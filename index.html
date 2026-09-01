@@ -1,0 +1,1544 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#e7dcc8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="スライムこうぼう">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<title>スライムこうぼう</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden}
+  body{background:radial-gradient(130% 130% at 50% 0%,#f0f7fc,#e7dcc8);
+    font-family:"Yu Gothic UI","Noto Sans JP",sans-serif;
+    /* 縦に長い画面では ひとかたまりを まんなかに寄せる。
+       部屋は横長なので、そうしないと下に大きな空きが残る */
+    display:flex;flex-direction:column;justify-content:center}
+  /* 部屋は透けているので、まわりの余白に UI を置ける */
+  /* 部屋は下に寄せる。こうすると 縦長の画面でも 部屋と一覧が離れず、
+     あまった余白は 上にまとまる */
+  main{position:relative;flex:1;min-height:0;max-height:calc((100vw - 16px) / 2);
+    display:flex;align-items:flex-end;justify-content:center;padding:0 8px}
+  /* canvas の大きさは kaplay に任せる。こちらで形を変えると、
+     kaplay が用意した絵をそのまま引きのばしてしまい 縦につぶれる。
+     かわりに 入れもの側を部屋の高さまでにして、上下の余りを出さない */
+  canvas{display:block;max-width:100%;max-height:100%}
+  footer{flex:none;display:flex;flex-direction:column;gap:9px;
+    padding:6px 12px calc(10px + env(safe-area-inset-bottom))}
+  .bar{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  .btn{border:0;cursor:pointer;font:inherit;font-size:14px;color:#4a5560;
+    background:rgba(255,255,255,.92);border:1px solid #d6e1e6;border-radius:999px;
+    padding:10px 18px;box-shadow:0 2px 8px rgba(90,110,130,.14)}
+  .btn:hover{background:#fff}
+  .btn b{color:#f0a500;margin-left:6px;font-weight:600}
+  .btn[hidden]{display:none}
+  header{flex:none;display:flex;align-items:center;gap:9px;
+    padding:calc(10px + env(safe-area-inset-top)) 14px 8px;pointer-events:none}
+  /* せってい（どのセッションを呼ぶか）は 右上に */
+  .gear{margin-left:auto;pointer-events:auto;position:relative;cursor:pointer;
+    width:40px;height:40px;flex:none;border-radius:50%;font:inherit;font-size:19px;
+    color:#5b6773;background:rgba(255,255,255,.92);border:1px solid #d6e1e6;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 6px rgba(90,110,130,.14)}
+  .gear:hover{background:#fff}
+  .gear b{position:absolute;top:-4px;right:-4px;background:#f0a500;color:#fff;
+    font-size:11px;font-weight:600;border-radius:999px;padding:1px 6px;line-height:1.5}
+  .gear b:empty{display:none}
+  header .dot{width:9px;height:9px;border-radius:50%;background:#cfd9df;transition:.4s}
+  header .dot.on{background:#f0a500;animation:pulse 1.6s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(240,165,0,.45)}70%{box-shadow:0 0 0 8px rgba(240,165,0,0)}100%{box-shadow:0 0 0 0 rgba(240,165,0,0)}}
+  /* 状態は いちばん上の左に。題名は要らないので その場所を使う */
+  .status{display:flex;align-items:center;gap:7px;font-size:13px;color:#5b6773;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .status b{color:#c9781f;font-size:14px;margin:0 1px}
+  .status b.urg{color:#d4402a}
+  header .dot.wait{background:#7694b4;animation:pulse 1.6s infinite}
+  /* うごいているセッションの一覧。色の丸でスライムと結びつける */
+  .legend{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;pointer-events:none}
+  .legend .row{display:flex;align-items:center;gap:8px;
+    background:rgba(255,255,255,.80);border:1px solid rgba(214,225,230,.9);
+    border-radius:999px;padding:5px 12px 5px 7px;box-shadow:0 1px 4px rgba(90,110,130,.10)}
+  .legend .dot{width:17px;height:17px;border-radius:50%;flex:none;
+    box-shadow:inset 0 -2px 3px rgba(0,0,0,.18)}
+  .legend .nm{font-size:13px;color:#3d4954;white-space:nowrap}
+  .legend .st{font-size:12px;color:#6f9c81;background:#e6f5ec;border-radius:999px;
+    padding:3px 9px;white-space:nowrap;flex:none}
+  .legend .st.rest{color:#98a3ad;background:#eef1f3}
+  .legend .st.wait{color:#4c6d92;background:#e2ebf6}
+  .legend .st.urg{color:#fff;background:#e2622c}
+  /* 細い画面では 部屋をなるべく大きく見せたい。
+     一覧は 折り返さず1行にして、はみ出すぶんは 横になぞって読む */
+  @media (max-width: 560px){
+    .legend{gap:5px}
+    .legend .row{padding:3px 9px 3px 5px;gap:6px}
+    .legend .nm{font-size:12px;max-width:none}
+    .legend .st{font-size:10px;padding:2px 6px}
+    .legend .dot{width:13px;height:13px}
+    .status{font-size:12px}
+    .status b{font-size:13px}
+    footer{gap:7px;padding:4px 10px calc(8px + env(safe-area-inset-bottom))}
+    header{padding:calc(8px + env(safe-area-inset-top)) 12px 6px}
+    header h1{font-size:15px}
+    .gear{width:36px;height:36px;font-size:17px}
+  }
+  /* ウィジェット姿。デスクトップに置く時は 部屋だけを出す */
+  body.widget{background:transparent}
+  body.widget footer{display:none}
+  body.widget main{max-height:none;padding:0}
+  /* 見出しの帯は残して、状態だけを 小さく重ねる。
+     スマホのウィジェットは 静止画で貼られることが多く、
+     動かない絵だけだと 何が起きているか分からないため */
+  body.widget header{position:absolute;top:0;left:0;right:0;z-index:20;
+    padding:5px 8px;pointer-events:none}
+  body.widget .status{font-size:12px;color:#46525e;
+    background:rgba(255,255,255,.78);border-radius:999px;padding:4px 11px}
+  body.widget .gear{display:none}
+  .wclose{position:fixed;right:5px;top:3px;z-index:60;width:26px;height:26px;
+    border:0;border-radius:50%;cursor:pointer;font:inherit;font-size:15px;
+    color:#6b7681;background:rgba(255,255,255,.75);opacity:0;transition:.2s;
+    display:none;align-items:center;justify-content:center;padding:0}
+  body.widget .wclose{display:flex}
+  body.widget:hover .wclose{opacity:1}
+  .offline{position:fixed;left:0;right:0;top:0;background:#ffe4e1;color:#a35;text-align:center;
+    font-size:12px;padding:calc(6px + env(safe-area-inset-top)) 6px 6px;display:none;z-index:30}
+
+
+  /* どのセッションを出すか えらぶ画面 */
+  .sheetWrap{position:fixed;inset:0;z-index:40;display:none;
+    background:rgba(60,70,80,.35);align-items:flex-end;justify-content:center}
+  .sheetWrap.open{display:flex}
+  .sheet{background:#fdfaf2;width:100%;max-width:520px;border-radius:18px 18px 0 0;
+    padding:18px 18px calc(18px + env(safe-area-inset-bottom));
+    box-shadow:0 -8px 30px rgba(60,70,80,.22);max-height:82vh;display:flex;flex-direction:column}
+  .sheet h2{font-size:16px;color:#4a5560;margin-bottom:12px;display:flex;align-items:center}
+  .sheet h2 button{margin-left:auto;border:0;background:none;font-size:22px;color:#9aa7b2;cursor:pointer;line-height:1}
+  .sheet .num{display:flex;align-items:center;padding:12px 4px;border-bottom:1px solid #eee6d8;
+    font-size:15px;color:#4a5560}
+  .sheet .num .btns{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .sheet .num button{width:36px;height:36px;border-radius:10px;border:1px solid #ddd3c2;
+    background:#fff;color:#4a5560;font:inherit;font-size:15px;cursor:pointer;padding:0}
+  .sheet .num button.on{background:#3eb489;border-color:#3eb489;color:#fff;font-weight:600}
+  .sheet .auto{display:flex;align-items:center;gap:10px;padding:12px 4px;border-bottom:1px solid #eee6d8;
+    font-size:15px;color:#4a5560;cursor:pointer}
+  .sheet .auto input{width:20px;height:20px;accent-color:#3eb489}
+  .sheet ul{list-style:none;overflow-y:auto;flex:1;margin-top:4px;min-height:50px}
+  .sheet li{display:flex;align-items:center;gap:11px;padding:11px 4px;border-bottom:1px solid #eee6d8;cursor:pointer}
+  .sheet li input{width:20px;height:20px;accent-color:#3eb489;flex:none}
+  .sheet li .nm{flex:1;font-size:15px;color:#4a5560;word-break:break-all}
+  .sheet li .st{font-size:12px;color:#7fa98f;background:#e6f5ec;border-radius:999px;padding:3px 10px;white-space:nowrap}
+  .sheet li .st.rest{color:#a0aab3;background:#eef1f3}
+  .sheet li .st.wait{color:#4c6d92;background:#e7eef7}
+  .sheet li .st.urg{color:#fff;background:#e2622c}
+  .sheet li.off .nm{color:#a8b3bd}
+  .sheet .empty{color:#a8b3bd;font-size:14px;text-align:center;padding:22px 0}
+  .sheet .hint{font-size:12px;color:#a8b3bd;margin-top:10px;text-align:center}
+</style>
+</head>
+<body>
+  <div class="offline" id="offline">つながっていません。PCで monitor.py を起動してね</div>
+  <header>
+    <div class="status" id="status"><span class="dot" id="dot"></span><span id="statusTxt">よみこみちゅう…</span></div>
+    <button class="gear" id="pickBtn" aria-label="セッションのせってい">⚙<b id="hiddenNote"></b></button>
+  </header>
+  <button class="wclose" id="wclose" aria-label="とじる">×</button>
+  <main><canvas id="game"></canvas></main>
+
+  <footer>
+    <div class="legend" id="legend"></div>
+    <div class="bar">
+      <button class="btn" id="phoneBtn" hidden>スマホで見る</button>
+    </div>
+  </footer>
+
+  <div class="sheetWrap" id="sheetWrap">
+    <div class="sheet">
+      <h2>どれを 工房に よぶ？<button type="button" id="sheetClose" aria-label="とじる">×</button></h2>
+      <div class="num">なんびき よぶ？<span class="btns" id="maxBtns"></span></div>
+      <label class="auto"><input type="checkbox" id="autoMode">
+        <span id="autoLabel">おまかせ</span></label>
+      <ul id="sessList"></ul>
+      <p class="hint" id="pickHint">工房がせまいので、いちどに5ひきまでだよ</p>
+    </div>
+  </div>
+
+  <div class="sheetWrap" id="qrWrap">
+    <div class="sheet qrsheet">
+      <h2>スマホで見る<button type="button" id="qrClose" aria-label="とじる">×</button></h2>
+      <p class="hint" style="margin-top:0">かべがみアプリに つなぐ</p>
+      <img id="qrPair" alt="アプリにつなぐQRコード">
+      <p class="hint">スマホの ふつうのカメラで 読みとってください。<br>
+        アプリが ひらいて 住所が 入ります</p>
+      <hr style="border:0;border-top:1px solid #e3ded2;margin:14px 0">
+      <p class="hint" style="margin-top:0">ブラウザで 見る</p>
+      <img id="qr" alt="スマホで読みとるQRコード">
+      <code id="phoneUrl"></code>
+    </div>
+  </div>
+
+  <script src="lib/kaplay.js"></script>
+  <script>
+  // ぜんぶを箱の中に閉じこめておく。
+  // kaplay は global:true でたくさんの名前を window に置くので、
+  // 外に書くとこちらの関数が黙って上書きされる（animate で実際にやられた）
+  (function(){
+  "use strict";
+
+  // 部屋の原寸（room.png）を内部解像度にする。CSSで画面に合わせて縮小
+  const RW=1774, RH=887;
+
+  const k = kaplay({
+    canvas: document.getElementById("game"),
+    width: RW, height: RH,
+    letterbox: true,
+    background: [0,0,0,0],       // 部屋は切りぬいてあるので、ページの色が透けて見える
+    global: true, pixelDensity: 2,
+    // 絵のふちが2値（あるか無いか）なので、拡大縮小で ぼかさないと
+    // ギザギザが そのまま出る
+    texFilter: "linear",
+  });
+
+
+  // ───────────────────────────────────────────
+  // キャラクターの束（パック）
+  //   スライムは既定のひとつ。あとから別のキャラを足せるよう、
+  //   絵の場所・並び・大きさを ここ一か所にまとめてある。
+  //   別のキャラを出す時は、この形の入れものを もうひとつ用意するだけ
+  // ───────────────────────────────────────────
+  // 絵は1枚だけ持ち、描くときに色相をずらして 何色でも作る。
+  // 8色ぶんのシートを配ると重いので、こうしている
+  loadShader("hue", null, `
+    uniform float u_hue;
+    vec3 toHSV(vec3 c){
+      vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+      vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+      vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+      float d = q.x - min(q.w, q.y);
+      return vec3(abs(q.z + (q.w - q.y) / (6.0*d + 1e-10)), d / (q.x + 1e-10), q.x);
+    }
+    vec3 toRGB(vec3 c){
+      vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+      vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+      return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    }
+    // 目に感じる明るさ。緑はいちばん明るく、青はいちばん暗く見える
+    const vec3 W = vec3(0.299, 0.587, 0.114);
+    vec4 frag(vec2 pos, vec2 uv, vec4 color, sampler2D tex) {
+      vec4 t = texture2D(tex, uv);
+      if (t.a < 0.01) return t;
+      vec3 h = toHSV(t.rgb);
+      h.x = fract(h.x + u_hue);
+      h.y *= 0.66;          // 原色に寄りすぎるので、すこし淡くする
+      vec3 c = toRGB(h);
+      // 色相をずらすと 数値は同じでも 青や紫が沈んで見える。
+      // もとの絵と同じ「感じる明るさ」になるよう ひきあげる
+      float l0 = dot(t.rgb, W);
+      float l1 = dot(c, W);
+      c = clamp(c * (l1 > 0.002 ? l0 / l1 : 1.0), 0.0, 1.0);
+      return vec4(c, t.a) * color;
+    }
+  `);
+
+  const PACK = {
+    id: "slime",
+    name: "スライム",
+    // 色は「もとの緑からどれだけ色相をずらすか」で表す
+    hues: [0, 0.11, 0.22, 0.32, 0.42, 0.55, 0.69, 0.80],
+    baseHue: 0.42,                         // もとの絵（緑）の色相
+    sheet: "sheet_green.png",              // 起きている絵（これ1枚）
+    sleepSheet: "sheet_sleep.png",         // 寝ている絵（1行目の緑だけ使う）
+    grid: { x: 4, y: 4 },
+    sleepGrid: { x: 4, y: 3 },
+    scale: 0.60, sleepScale: 0.58,
+    foot: 8, sleepFoot: 6,                 // コマの下から絵までの余白
+    // 頭のてっぺんまでの高さ。列（＝ぷるんの段階）で大きく変わるので
+    // ひとつの数字で決め打ちすると、ぺたんこの時に吹き出しが浮いてしまう
+    headByCol: [212, 168, 262, 212],
+    sleepHead: 250,
+    head: 212,                             // 予備（列が分からない時）
+    // 列 … 0:まるい 1:ぺたんこ 2:のび 3:まるい （0→3 で「ぷるん」と一往復）
+    // 行 … 0:正面 1:ひだり向き 2:みぎ向き 3:うしろ姿
+    //
+    // 左右は絵として描き分けてある（目のある側がちがう）。
+    // 片方だけ使って反転させると、進む向きと顔の向きが逆になる
+    anims: {
+      walk:  { from:0,  to:3,  loop:true, speed:7 },
+      walkL: { from:4,  to:7,  loop:true, speed:7 },
+      walkR: { from:8,  to:11, loop:true, speed:7 },
+      away:  { from:12, to:15, loop:true, speed:7 },
+      idle: 0, idleL: 4, idleR: 8,
+      cheer: 2,
+    },
+  };
+
+  loadSprite("room", "room_cut.png");
+  // 部屋の絵から切り出したテーブル。奥にいる子の「うえ」に重ねて 前後を出す
+  loadSprite("table", "table.png");
+  loadSprite("slime", PACK.sheet,
+    { sliceX: PACK.grid.x, sliceY: PACK.grid.y, anims: PACK.anims });
+  loadSprite("sleeper", PACK.sleepSheet,
+    { sliceX: PACK.sleepGrid.x, sliceY: PACK.sleepGrid.y,
+      anims: { rest: { from:0, to:PACK.sleepGrid.x-1, loop:true, speed:1.4 } } });
+
+  // 色まわりの計算をひとまとめに。一覧の丸・吹き出し・文字を すべて同じ色相から作る
+  function hsl(h, sa, l){
+    const f = (n)=>{ const k = (n + h*12) % 12; const a = sa*Math.min(l, 1-l);
+      return l - a*Math.max(-1, Math.min(Math.min(k-3, 9-k), 1)); };
+    return [f(0), f(8), f(4)].map(v => Math.round(v*255));
+  }
+  const hueOf     = (i)=> (PACK.baseHue + PACK.hues[i % PACK.hues.length]) % 1;
+  const hueSwatch = (i)=> { const c = hsl(hueOf(i), 0.62, 0.45); return `rgb(${c[0]},${c[1]},${c[2]})`; };
+  const hueTint   = (i)=> hsl(hueOf(i), 0.72, 0.93);   // 吹き出しの下じき
+  const hueInk    = (i)=> hsl(hueOf(i), 0.60, 0.30);   // 吹き出しの文字
+
+  // 手描きの吹き出し。四隅としっぽを潰さずに横へ伸ばすため 9分割で読む
+  loadSprite("bubble", "bubble.png", { slice9:{ left:46, right:46, top:33, bottom:44 } });
+  // スライムの「下」に置くので、しっぽの無い版を使う
+  loadSprite("bubble_plain", "bubble_plain.png", { slice9:{ left:46, right:46, top:31, bottom:31 } });
+  const BUB_H = 83;       // 吹き出しの高さ（原寸のまま使う）
+  const BUB_TAIL = 24;    // 左端から しっぽの先までの距離
+  const BUB_CY = 35;      // 上端から 文字を置く高さ（絵の本体のまんなか）
+  const BUB_MINW = 100;   // これより細くすると 9分割がつぶれる
+  const BUB_PH = 72;      // しっぽ無しの高さ
+  const BUB_PCY = 34;     // その中で 文字を置く高さ
+  const BUB_ALPHA = 0.80; // すこし透ける。後ろの部屋が見えると軽く見える
+
+  // 仕事の種類 → 色
+  const COLOR = {
+    // PCで走っている処理
+    'SNS投稿':'pink','スライド作成':'green','ブラウザ操作':'blue',
+    '資料づくり':'green','画像しょり':'pink','書類の変換':'blue','処理中':'green',
+    // トバが手を動かしている（フックから届く）
+    'かんがえちゅう':'pink','しらべもの':'blue','かきもの':'green',
+    'コマンド':'green','ネットしらべ':'blue','なかまをよぶ':'pink',
+    'メール・よてい':'pink','ブラウザそうさ':'blue','しりょうづくり':'green',
+    'おしごと':'green',
+  };
+
+  // たまにこぼす ひとりごと
+  const TALK = {
+    'かんがえちゅう':['うーん…','どうしよっかな','ひらめきそう','ちょっとまってね'],
+    'しらべもの':  ['どこだっけ','あった！','ふむふむ','おくのほうかな'],
+    'かきもの':    ['ていねいに…','はい、なおした','ここ直すね','しんちょうに'],
+    'コマンド':    ['えいっ','ぽちっとな','うごけー','いくよー'],
+    'ネットしらべ':['せかいはひろい','みつけた！','なるほど〜'],
+    'なかまをよぶ':['てつだって〜','みんな来た！','たすかる〜'],
+    'メール・よてい':['おてがみだ','よていメモっと','わすれないよ'],
+    'ブラウザそうさ':['ぽちぽち','このボタンかな','よみこみちゅう'],
+    'しりょうづくり':['きれいにするね','もうすこし','いいかんじ'],
+  };
+  const TALK_ANY   = ['ふぅ…','がんばるぞ','ゆま、みてる？','よいしょ','いいてんきだね','ぷるん'];
+  // 手あきの子のひとりごと
+  const TALK_FREE  = ['ひまだなあ','なにか こないかな','そうじでもする？','おなかすいた',
+                      'ゆま、げんき？','ぷるぷる','ひなたぼっこ','だれか あそぼ'];
+  const TALK_WAKE  = ['ん…おきた！','よんだ？','はーい！','いま いくよ'];
+  const TALK_SLEEP = ['すぅ…','むにゃ…','zzz…','ゆま…おかえり…'];
+
+  // ───────────────────────────────────────────
+  // 時計を見てしゃべる
+  //   スライムは「いま何時か」を知っている。時間帯でひとりごとが変わり、
+  //   たまに時刻そのものを口にする（PCの時計をそのまま見ている）
+  // ───────────────────────────────────────────
+  const TIME_TALK = [
+    { to:4,  lines:['しずかだね','よふかし なかま','つきが きれい','せかいが ねてる'] },
+    { to:6,  lines:['そらが しらんできた','もうすぐ あさだ','とりが ないてる'] },
+    { to:9,  lines:['おはよう！','あさだね','きょうも はじまるよ','あさの ひかり きもちいい'] },
+    { to:11, lines:['きょうも がんばろ','いいてんき かな','あさのうちに かたづけよ'] },
+    { to:14, lines:['おなかすいた','おひる たべた？','ごはんの じかんだ','おひるやすみ〜'] },
+    { to:17, lines:['おやつの じかん？','ひざしが かたむいてきた','ごごは ねむくなるね'] },
+    { to:19, lines:['そとが あかいよ','ゆうやけ きれい','もうすぐ よるだね'] },
+    { to:23, lines:['よるだね','よるは しずかで すきだな','ほしが でてるかな','よるのほうが はかどる？'] },
+    { to:25, lines:['しずかだね','よふかし なかま','つきが きれい'] },
+  ];
+  const MORNING_FROM = 6, MORNING_TO = 11;   // 「おはよう」と言っていい時間
+
+  function nowHM(){ const d = new Date(); return [d.getHours(), d.getMinutes()]; }
+  function timeLines(){
+    const h = nowHM()[0];
+    return (TIME_TALK.find(b => h < b.to) || TIME_TALK[0]).lines;
+  }
+  // 時刻そのもの。きっちり言わず、だいたいで言う方がスライムらしい
+  function clockLine(){
+    const [h, m] = nowHM();
+    if(m < 5)  return `${h}じ ちょうどだ`;
+    if(m < 20) return `いま ${h}じ すぎ`;
+    if(m < 40) return `${h}じ はんごろ`;
+    return `もうすぐ ${(h + 1) % 24}じ`;
+  }
+
+  const SC = PACK.scale;              // キャラの大きさ
+  const SC_SLEEP = PACK.sleepScale;   // 寝すがたは別シートなので別倍率
+  const SPEED = 88;          // 歩く速さ。体が大きくなったぶん速める
+  const SLIME_H = PACK.head*SC;       // 予備の値（列が分からない時）
+
+  // いまのコマの、頭のてっぺんまでの高さ。
+  // ぺたんこの時とのびている時で 100以上ちがうので、そのつど見る
+  function headOf(s){
+    if(s.mode === "sleep") return PACK.sleepHead * SC_SLEEP;
+    const n = PACK.grid.x;
+    const c = (((s.frame | 0) % n) + n) % n;
+    return (PACK.headByCol[c] || PACK.head) * SC;
+  }
+  // シートは下ぞろえしてあるので、その余白ぶん体を下げて影に乗せる
+  const FOOT = PACK.foot*SC;
+  const FOOT_SLEEP = PACK.sleepFoot*SC_SLEEP;
+  const HOP  = 19*SC;        // 歩くときに跳ねる高さ
+  const SHX  = 2.8*SC;       // 影の横幅（体に合わせる）
+  const SHY  = 0.75*SC;      // 影のつぶれ具合
+  const FONT  = 34;          // 「なにをしてるか」の文字。大きすぎると大声に見える
+  const TAG_FONT = 25;       // 頭のうえの名札
+  const TAG_ALPHA = 0.36;    // 名札の下じきの すけ具合
+  // 名札の色。ゆまの番になっている時は 目立たせる
+  // 床が あたたかい茶色なので、橙や琥珀だと埋もれる。
+  // 赤と青なら 床から はっきり浮く
+  // 名札はいつも中立の色。色は「どのセッションか」を表すものにして、
+  // 状態は 印とことばで伝える（役割を混ぜない）
+  const pick = (a)=> a[Math.floor(rand(0,a.length))%a.length];
+
+  // 床の歩ける範囲（room画像内の楕円）。アイソメなので横長の楕円が自然
+  const FLOOR = { cx: RW*0.50, cy: RH*0.66, rx: RW*0.34, ry: RH*0.17 };
+  // 部屋のまんなかの低いテーブル。ここは踏ませない
+  // まんなかの低いテーブルの「天板」。ここには乗せない。
+  // 脚のあたり（天板より下）は ただの床なので通ってよい
+  // テーブルの形。まるで囲うと 角が余ったり 余計な床まで潰れるので、
+  // 絵のとおりの 多角形で切る。ここには だれも立てない
+  const TB_POLY = [[850,462],[1076,540],[1080,600],[928,690],[880,690],[688,600],[680,526]];
+  const TABLE_IMG = { x: 670, y: 452, front: 700 };
+  const TB_EDGE = 18;                     // ふちから これだけは 離れて立つ
+
+  function inTable(p){
+    let inside = false;
+    for(let i = 0, j = TB_POLY.length - 1; i < TB_POLY.length; j = i++){
+      const [xi,yi] = TB_POLY[i], [xj,yj] = TB_POLY[j];
+      if((yi > p.y) !== (yj > p.y) && p.x < (xj-xi)*(p.y-yi)/(yj-yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+
+  // いちばん近い ふちの点と、そこまでの きょり
+  function nearEdge(p){
+    let bx = p.x, by = p.y, bd = Infinity, ux = 0, uy = 0;
+    for(let i = 0; i < TB_POLY.length; i++){
+      const [ax,ay] = TB_POLY[i], [cx,cy] = TB_POLY[(i+1) % TB_POLY.length];
+      const ex = cx-ax, ey = cy-ay, ll = ex*ex + ey*ey;
+      const t = ll < 1e-6 ? 0 : Math.max(0, Math.min(1, ((p.x-ax)*ex + (p.y-ay)*ey) / ll));
+      const qx = ax + ex*t, qy = ay + ey*t;
+      const d = (p.x-qx)**2 + (p.y-qy)**2;
+      if(d < bd){ bd = d; bx = qx; by = qy; const el = Math.sqrt(ll); ux = ex/el; uy = ey/el; }
+    }
+    return { x: bx, y: by, d: Math.sqrt(bd), ux, uy };
+  }
+
+  // ふたりの 待ち合わせ場所。横にならんで 高さをそろえる。
+  // ななめに立つと どちらかが 奥に見えて 会話らしくない
+  function meetSpots(mid){
+    const c = clearOfTable(mid), h = CHAT_DIST/2;
+    for(const sh of [0, 60, -60, 120, -120, 190, -190]){
+      const lx = c.x + sh - h, rx = c.x + sh + h, y = c.y;
+      const L = vec2(lx, y), R = vec2(rx, y);
+      if(inTable(L) || inTable(R)) continue;
+      if(nearEdge(L).d < 8 || nearEdge(R).d < 8) continue;
+      if(!onFloorOk(L) || !onFloorOk(R)) continue;
+      return [L, R];
+    }
+    return null;
+  }
+  function onFloorOk(p){
+    const dx = (p.x - FLOOR.cx)/FLOOR.rx, dy = (p.y - FLOOR.cy)/FLOOR.ry;
+    return dx*dx + dy*dy <= 1;
+  }
+
+  // 待ち合わせ場所などに使う。テーブルから じゅうぶん離した点にする
+  function clearOfTable(p){
+    const q = offTable(p);
+    const e = nearEdge(q);
+    if(e.d >= TB_EDGE) return onFloor(q);
+    const dx = q.x - e.x, dy = q.y - e.y, l = Math.sqrt(dx*dx + dy*dy);
+    if(l < 1e-4) return onFloor(q);
+    return onFloor(vec2(e.x + dx/l*TB_EDGE, e.y + dy/l*TB_EDGE));
+  }
+
+  // テーブルに当たったら ふちに沿ってすべらせる。
+  // 押しもどすだけだと 向こう側へ行きたい時に ずっと つっかかる
+  function slideAlong(from, v){
+    const np = from.add(v);
+    if(!inTable(np)) return np;
+    const e = nearEdge(np);
+    const dot = v.x*e.ux + v.y*e.uy;
+    const sl = vec2(from.x + e.ux*dot, from.y + e.uy*dot);
+    return inTable(sl) ? offTable(sl) : sl;
+  }
+
+  // うっかり乗り上げたら、いちばん近いふちの外へ 押しもどす
+  function offTable(p){
+    if(!inTable(p)) return p;
+    const e = nearEdge(p);
+    const dx = e.x - p.x, dy = e.y - p.y;
+    const l = Math.sqrt(dx*dx + dy*dy);
+    if(l < 1e-4) return vec2(e.x, e.y);
+    return vec2(e.x + dx/l*2, e.y + dy/l*2);
+  }
+
+  const LABEL_Z = 50000;       // 名札・ことばは 部屋のものより ぜんぶ上
+  const allSlimes = [];        // いま部屋にいる子たち（場所えらびで使う）
+
+  // 床からはみ出さないように 押しもどす
+  function onFloor(p){
+    const dx = (p.x - FLOOR.cx) / FLOOR.rx, dy = (p.y - FLOOR.cy) / FLOOR.ry;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if(d <= 1 || d < 1e-4) return p;
+    return vec2(FLOOR.cx + dx/d*FLOOR.rx, FLOOR.cy + dy/d*FLOOR.ry);
+  }
+
+  function anyFloorPoint(){
+    const a = rand(0, Math.PI*2);
+    const r = Math.sqrt(rand());
+    return vec2(FLOOR.cx + Math.cos(a)*FLOOR.rx*r,
+                FLOOR.cy + Math.sin(a)*FLOOR.ry*r);
+  }
+  // 行き先えらび。テーブルを避けて、なるべく仲間から離れた所を選ぶ。
+  // 近くで止まると、ことばの吹き出しどうしが重なって読めなくなる
+  function floorPoint(self){
+    let best = null, bestScore = -1;
+    for(let i = 0; i < 16; i++){
+      const p = anyFloorPoint();
+      if(inTable(p) || nearEdge(p).d < TB_EDGE) continue;   // テーブルと そのまわり
+      let near = 1e9;
+      for(const o of allSlimes){
+        if(o === self || o.dying || !o.gp) continue;
+        near = Math.min(near, p.dist(o.gp));
+      }
+      if(near > bestScore){ bestScore = near; best = p; }
+    }
+    return best || offTable(anyFloorPoint());
+  }
+  // ぬしスライムのねどこ（部屋のすみっこ）
+  const BED = vec2(FLOOR.cx - FLOOR.rx*0.72, FLOOR.cy + FLOOR.ry*0.55);
+
+  // ゆまの番になっている子の待ち場所。
+  // 部屋のいちばん奥（壁ぎわ）に、壁の形に沿って並ぶ。
+  // まんなかに立たれると、はたらいている子の邪魔になる
+  const WAIT_GAP = 158;
+  // 何もしていない子は、部屋の手前で並んで待つ。
+  // 奥＝ゆまの番／まんなか＝おしごと／手前＝たいき、と場所で分ける
+  function standbySpot(i, n){
+    const t = Math.max(-0.86, Math.min(0.86,
+              (i - (n - 1) / 2) * WAIT_GAP / FLOOR.rx));
+    return vec2(FLOOR.cx + t * FLOOR.rx,
+                FLOOR.cy + FLOOR.ry * Math.sqrt(Math.max(0, 1 - t*t)) - 16);
+  }
+  function waitSpot(i, n){
+    const t = Math.max(-0.92, Math.min(0.92,
+              (i - (n - 1) / 2) * WAIT_GAP / FLOOR.rx));
+    return vec2(FLOOR.cx + t * FLOOR.rx,
+                FLOOR.cy - FLOOR.ry * Math.sqrt(Math.max(0, 1 - t*t)) + 12);
+  }
+
+  // 背景
+  const bg = add([ sprite("room"), pos(0,0), z(-100) ]);
+  // テーブルは 部屋の絵にも写っているが、もういちど 同じ場所に重ねる。
+  // z を「テーブルが床にふれている手前のふち」にすると、
+  // 奥にいる子は下に、手前にいる子は上に来て、前後がちゃんと出る
+  add([ sprite("table"), pos(TABLE_IMG.x, TABLE_IMG.y), z(TABLE_IMG.front) ]);
+  bg.onUpdate(()=>{ bg.width=RW; bg.height=RH; });
+
+  // ───────────────────────────────────────────
+  // スライム1匹ぶんの体をつくる
+  //   gp   … 床の上での本当の位置（影もここ）
+  //   pos  … gp から跳ねたぶんだけ持ち上げた、見た目の位置
+  // ───────────────────────────────────────────
+  function makeSlime(hueIdx, startPos, animName){
+    const gp = startPos || floorPoint();
+
+    // 影。跳ぶと小さく薄くなるので、浮いてる感じが出る
+    const shadow = add([
+      circle(34), pos(gp), anchor("center"), scale(vec2(SHX,SHY)),
+      color(72,58,48), opacity(0.28), z(gp.y-1),
+    ]);
+
+    const s = add([
+      sprite("slime", { anim: animName || "idle" }),
+      shader("hue", { u_hue: PACK.hues[hueIdx % PACK.hues.length] }),
+      pos(gp), anchor("bot"), scale(SC), z(gp.y),
+      {
+        gp: gp.clone(), target: floorPoint(), rest: 0,
+        t: rand(0,10), dying: false, mode: "idle",
+        shadow, bub:null, back:null, say:0, talkIn: rand(4,14),
+        bubLift: 0,      // 吹き出しの高さをずらす量（重なり防止）
+        face: null,      // 立ち止まっている時に向いている方（"L"/"R"/null）
+        sessionId: null, // どのセッションの子か
+        tagBg: null, tagTxt: null,    // 頭のうえの名札
+        waitSpot: null,     // ゆまの番の時に 並ぶ場所（奥の壁ぎわ）
+        standbySpot: null,  // 何もしていない時に 並ぶ場所（手前）
+        bubBase: 0,      // ふだんの吹き出しの段
+        waiting: null,   // ゆまの番になっているか
+        lastSay: null,   // 最後に出した ひとこと
+        job: null,       // 持っている仕事（null なら手あき）
+        cheerFor: 0,     // よろこんでいる残り時間
+        zzzIn: 0,        // つぎに 💤 を出すまで
+        temp: false,     // 助っ人なら true（仕事が終わると帰る）
+        hueIdx: hueIdx,      // 何色の子か
+        baseSprite: "slime", // 起きている時の絵
+        bed: null,       // ねどこ
+        textCol: null,   // 札の文字の色
+      },
+    ]);
+
+    // 吹き出し（なにをしてるか／ひとりごと）
+    // 位置は左上ぞろえで自分で計算する（botleft は 9分割だと効かない）
+    const back = add([ sprite("bubble_plain"), pos(0,0), anchor("topleft"),
+      color(255,255,255), opacity(0), z(99998) ]);
+    const bub = add([ text("",{size:FONT}), pos(0,0), anchor("center"),
+      color(74,85,96), opacity(0), z(99999) ]);
+    s.bub = bub; s.back = back;
+
+    // 名札。頭のうえに、うっすら透けて出る
+    const tagBg = add([ rect(10,10,{radius:9}), pos(0,0), anchor("center"),
+      color(38,46,54), opacity(0), z(0) ]);
+    const tagTxt = add([ text("",{size:TAG_FONT}), pos(0,0), anchor("center"),
+      color(255,255,255), opacity(0), z(0) ]);
+    // 「おはなししたい」の しるし。小さな吹き出しが 頭のうえで ふわふわ する。
+    // 絵文字は この書体に入っていないので、吹き出しの絵を 小さく使う
+    const markBg = add([ rect(54,34,{radius:15}), pos(0,0), anchor("center"),
+      color(255,255,255), opacity(0), z(0) ]);
+    const markTip = add([ circle(6), pos(0,0), anchor("center"),
+      color(255,255,255), opacity(0), z(0) ]);
+    const markTxt = add([ text("…",{size:26}), pos(0,0), anchor("center"),
+      color(74,85,96), opacity(0), z(0) ]);
+    s.tagBg = tagBg; s.tagTxt = tagTxt;
+    s.markBg = markBg; s.markTip = markTip; s.markTxt = markTxt;
+
+    // ぽんっと出てくる
+    s.scale = vec2(SC*0.3, SC*0.3);
+    allSlimes.push(s);
+    return s;
+  }
+
+  // 絵をまるごと差しかえる。古い絵の情報を先に外さないと、
+  // 「前のアニメ名」を新しい絵に対して再生しようとして落ちる
+  function swapSprite(o, spriteName, animName){
+    o.unuse("sprite");
+    o.use(sprite(spriteName, { anim: animName }));
+  }
+
+  // 吹き出しの中身を書きかえる（空っぽなら隠す）
+  function setBubble(s, txt, col){
+    s.bub.text = txt || "";
+    s.bub.color = col || s.textCol || rgb(74,85,96);
+    const on = !!txt;
+    s.bub.opacity = on ? 1 : 0;
+    s.back.opacity = on ? BUB_ALPHA : 0;
+  }
+
+  // 「ゆまの番」の印を出し入れする
+  // 頭のうえの名札を書きかえる。ゆまの番の時は色を変えて目立たせる
+  function setTag(s, text, waiting){
+    if(!s.tagTxt) return;
+    // 待っている間は 名札のほうに「！」を付けて色を変える。
+    // 大ぜい待つと 足もとの吹き出しが 横一列に並んで
+    // 部屋が見えなくなるので、待ち中は 名札ひとつに まとめている
+    // きょかまち＝トバが手を止めて 承認を待っている。ここだけ 赤く目立たせる。
+    // へんじまち＝区切りがついて ゆまの番なだけ。急ぎではないので
+    //             名札はそのまま、頭のうえに 💬 を出して知らせる
+    const urgent = (waiting === "permission");
+    const t = (urgent ? "！" : "") + (text || "");
+    const w = urgent ? "permission" : "";
+    if(s.tagTxt.text !== t){
+      s.tagTxt.text = t;
+      s.tagTxt.opacity = t ? 0.95 : 0;
+    }
+    if(s._tagW !== w){
+      s._tagW = w;
+      s.tagBg.color = w ? rgb(198, 44, 30) : rgb(38, 46, 54);
+      s.tagBg.opacity = !t ? 0 : (w ? 0.92 : TAG_ALPHA);
+    }
+  }
+
+  // その子の色を、吹き出しと文字に反映する
+  function applyTint(s){
+    const t = hueTint(s.hueIdx), c = hueInk(s.hueIdx);
+    if(s.markBg){
+      s.markBg.color = s.markTip.color = rgb(t[0], t[1], t[2]);
+      s.markTxt.color = rgb(c[0], c[1], c[2]);
+    }
+    s.back.color = rgb(t[0], t[1], t[2]);
+    s.textCol = rgb(c[0], c[1], c[2]);
+  }
+
+  // ひとことしゃべる（しばらくしたら元の表示にもどる）
+  function talk(s, line){
+    s.say = 2.6;
+    setBubble(s, line, rgb(120,132,145));
+  }
+
+  // 進む向きから、使うアニメを選ぶ
+  function walkAnim(s, d){
+    let want;
+    if(Math.abs(d.x) > Math.abs(d.y)*1.1) want = (d.x < 0) ? "walkL" : "walkR";
+    else if(d.y < 0)                      want = "away";   // むこうへ
+    else                                  want = "walk";   // こっちへ
+    if(s.curAnim() !== want) s.play(want);
+    s.face = null;      // 歩いている間は、向きは絵まかせ
+  }
+
+  // 毎フレームの共通の動き。跳ねる・つぶれる・伸びる、を全部ここで
+  function stepBody(s){
+    s.t += dt();
+    const bounce = (s.mode === "walk");
+    let hop = 0, sx = 1, sy = 1;
+
+    if(s.mode === "sleep"){
+      // 寝息は絵の方が4コマで持っているので、こちらでは何もしない
+    }else if(bounce){
+      // 歩き。上下に跳ねて、着地のたびに ぺたっとつぶれる
+      const ph = s.t*9;
+      hop = Math.abs(Math.sin(ph))*HOP;
+      const land = Math.max(0, -Math.cos(ph*2));       // 着地の瞬間だけ効く
+      sx = 1 + land*0.10; sy = 1 - land*0.10;
+    }else{
+      // 立ち止まり。ゆらーっと呼吸
+      const b = Math.sin(s.t*2.4);
+      sx = 1 + b*0.022; sy = 1 - b*0.020;
+    }
+
+    const sleeping = (s.mode === "sleep");
+    s.pos = vec2(s.gp.x, s.gp.y - hop + (sleeping ? FOOT_SLEEP : FOOT));
+    const sc = sleeping ? SC_SLEEP : SC;
+    s.scale = vec2(sc*sx, sc*sy);   // 反転しない（左右は絵で分かれている）
+    s.z = s.gp.y;
+
+    // 影は床にはりついたまま。跳ぶほど小さく薄く
+    const lift = 1 - Math.min(1, hop/(HOP+3))*0.34;
+    s.shadow.pos = s.gp;
+    s.shadow.scale = vec2(SHX*lift, SHY*lift);
+    s.shadow.opacity = 0.28*lift;
+    s.shadow.z = s.gp.y - 1;
+
+    const head = headOf(s);
+    // 部屋の 奥半分にいる子は 上が壁で空いている。手前の子は 下が空いている。
+    // 空いている側に ことばを出すと、ほかの子と重なりにくい
+    const upper = (s.gp.y < FLOOR.cy);
+
+    // ① 名札は いつも頭のすぐうえ
+    let top = s.gp.y - head - hop - 12;
+    if(s.tagTxt.text){
+      s.tagTxt.pos = vec2(s.gp.x, top);
+      s.tagBg.pos  = vec2(s.gp.x, top);
+      s.tagBg.width  = s.tagTxt.width + 22;
+      s.tagBg.height = s.tagTxt.height + 9;
+      s.tagTxt.z = LABEL_Z + s.gp.y + 2;
+      s.tagBg.z  = LABEL_Z + s.gp.y + 1;
+      top -= s.tagBg.height/2 + 6;
+    }
+    if(s.markBg){
+      const want = (s.waiting === "reply" && !s.dying && !s.bub.text) ? 1 : 0;
+      s.markBg.opacity += (want - s.markBg.opacity) * Math.min(1, dt()*8);
+      const o = s.markBg.opacity;
+      s.markTxt.opacity = o; s.markTip.opacity = o;
+      const mx = s.gp.x + 2, my = top - 30 + Math.sin(s.t*2.6)*4;
+      s.markBg.pos = vec2(mx, my);
+      s.markTip.pos = vec2(mx - 15, my + 19);      // しっぽ
+      s.markTxt.pos = vec2(mx, my - 4);
+      s.markBg.z = LABEL_Z + s.gp.y + 3;
+      s.markTip.z = LABEL_Z + s.gp.y + 3;
+      s.markTxt.z = LABEL_Z + s.gp.y + 4;
+    }
+
+    // ② ことばは 空いている側へ
+    const bw = Math.max(BUB_MINW, s.bub.width + 34);
+    let bx = s.gp.x - bw/2;
+    bx = Math.max(8, Math.min(bx, RW - bw - 8));            // 画面からはみ出さない
+    const btop = upper ? (top - BUB_PH - s.bubLift)
+                       : (s.gp.y + 6 + s.bubLift);
+    s.back.pos = vec2(bx, btop);
+    s.back.width = bw; s.back.height = BUB_PH;
+    s.back.z = LABEL_Z + s.gp.y + 1;
+    s.bub.pos = vec2(bx + bw/2, btop + BUB_PCY);
+    s.bub.z = LABEL_Z + s.gp.y + 2;
+
+  }
+
+  // ───────────────────────────────────────────
+  // スライム1匹の暮らし
+  //   工房には いつも3匹が住んでいる。仕事が来ると そのうちの誰かが引きうける。
+  //     job あり … 仕事中。頭の上に なにをしているかの札を出す
+  //     job なし … 手あき。札は出さず、のんびり うろうろする
+  // ───────────────────────────────────────────
+  let bubStep = 0;
+
+  // ひとりごとの番。しゃべり終わったら 仕事の札にもどす。
+  // 中身は「しゃべる瞬間」に組み立てる（毎フレーム作らないし、時計もその時に見る）
+  function tickTalk(s, makeLine, lo, hi){
+    if(s.inChat) return;          // かけあい中は ひとりごとを言わない（2つ出て重なる）
+    if(s.say > 0){
+      s.say -= dt();
+      if(s.say <= 0) setBubble(s, s.job || "");
+    }else{
+      s.talkIn -= dt();
+      if(s.talkIn <= 0){ s.talkIn = rand(lo, hi); talk(s, makeLine(s)); }
+    }
+  }
+
+  // 仕事中の子 … 手もとの話が多め、たまに時間の話
+  function jobLine(s){
+    if(rand() < 0.14) return clockLine();
+    return pick((TALK[s.job] || []).concat(TALK_ANY, timeLines()));
+  }
+  // ぬしは トバ本人。ひとりごとも 本人の口ぶりで
+  const TALK_TOBA = [
+    'よし、いくか','みんな よくやってる','俺が ついてる',
+    'ゆま、むりするなよ','そろそろ 動くか','ここは まかせろ',
+    '手が 足りてるか？','ひととおり 見ておくか','落ちついてるな',
+    'きょうも はじめるか','だいじょうぶ、まわってる','俺は ここに いる',
+  ];
+  // トバと 住人の かけあい。ならびは トバ→住人→トバ…
+  const TOBA_TALKS = [
+    ['ちょうし どうだ？','ばっちりだよ','その ちょうしだ'],
+    ['こまったら 言えよ','うん！','よし'],
+    ['ゆま、げんきかな','げんきだと おもう','ならいい'],
+    ['よく やってるな','ほんと？','ああ'],
+    ['休んでも いいんだぞ','まだ いける','むりするなよ'],
+    ['なにか 手つだうか','だいじょうぶ！','そうか'],
+    ['ここまでで 十分だ','もうすこし やる','ほどほどにな'],
+    ['その しごと、はじめてだったな','きんちょうした','上できだ'],
+  ];
+  const TOBA_CALL = ['ねえ トバ','トバ','あのね トバ'];
+
+  // 手あきの子 … ひまなので、外の景色や時間の話をよくする
+  function freeLine(s){
+    if(s && s.isNushi) return pick(TALK_TOBA);
+    if(rand() < 0.22) return clockLine();
+    const t = timeLines();
+    return pick(TALK_FREE.concat(TALK_ANY, t, t));
+  }
+  // 寝ている子 … ねごと。たまに寝ぼけて時計を言う
+  function sleepLine(){
+    if(rand() < 0.12) return clockLine() + '…';
+    return pick(TALK_SLEEP);
+  }
+
+  function giveLife(s){
+    s.bubLift = s.bubBase = (bubStep++ % 3) * 20;
+
+    s.onUpdate(()=>{
+      if(s.dying){ stepBody(s); return; }
+
+      // ── 寝ているあいだ ──
+      if(s.mode === "sleep"){
+        s.zzzIn -= dt();
+        if(s.zzzIn <= 0){
+          s.zzzIn = rand(2.4, 5.0);
+          // 変数名を z にすると kaplay の z() と衝突するので注意
+          const puff = add([ text("💤",{size:40}),
+            pos(s.gp.add(rand(20,46), -headOf(s)*0.55)),
+            anchor("center"), z(99999), opacity(1) ]);
+          puff.onUpdate(()=>{ puff.opacity -= dt()*0.30; puff.pos.y -= dt()*16; puff.pos.x += dt()*6;
+            if(puff.opacity<=0) destroy(puff); });
+        }
+        tickTalk(s, sleepLine, 14, 30);
+        stepBody(s);
+        return;
+      }
+
+      // ── おしごと おわりの ひとしきり ──
+      if(s.cheerFor > 0){
+        s.cheerFor -= dt();
+        if(s.curAnim() !== "cheer") s.play("cheer");
+        tickTalk(s, jobLine, 9, 22);
+        stepBody(s);
+        return;
+      }
+
+      // ── ゆまの番になっている ──
+      // 机の前の 自分の場所まで歩いて、そこで立って待つ
+      if(s.waiting && s.waitSpot){
+        const d = s.waitSpot.sub(s.gp);
+        if(d.len() > 10){
+          s.mode = "walk";
+          walkAnim(s, d);
+          s.gp = offTable(s.gp.add(d.unit().scale(SPEED*dt())));
+        }else{
+          s.mode = "idle";
+          s.face = null;
+          if(s.curAnim() !== "idle") s.play("idle");
+        }
+        stepBody(s);
+        return;
+      }
+
+      // ── たいき ──
+      // 何もしていない子は 手前の持ち場へ。着いたら そこで待つ。
+      // おしゃべりが始まったら そちらを優先する
+      if(s.standbySpot && !s.inChat && !s.job && !s.waiting){
+        const d = s.standbySpot.sub(s.gp);
+        if(d.len() > 12){
+          s.mode = "walk";
+          walkAnim(s, d);
+          s.gp = offTable(s.gp.add(d.unit().scale(SPEED*0.7*dt())));
+        }else{
+          s.mode = "idle";
+          const want = s.face ? ("idle" + s.face) : "idle";
+          if(s.curAnim() !== want) s.play(want);
+        }
+        tickTalk(s, () => freeLine(s), 14, 30);
+        stepBody(s);
+        return;
+      }
+
+      // ── ひとりごと ──
+      tickTalk(s, s.job ? jobLine : freeLine, s.job ? 9 : 12, s.job ? 22 : 28);
+
+      // ── 休む・歩く ──
+      // 手あきの子は のんびり歩いて、よく立ち止まる
+      if(s.rest > 0){
+        s.rest -= dt();
+        s.mode = "idle";
+        const want = s.face ? ("idle" + s.face) : "idle";
+        if(s.curAnim() !== want) s.play(want);
+        stepBody(s);
+        return;
+      }
+      const d = s.target.sub(s.gp);
+      if(d.len() < 8){
+        if(rand() < (s.job ? 0.50 : 0.62)) s.rest = rand(1.0, s.job ? 3.0 : 4.4);
+        else s.target = floorPoint(s);
+      }else{
+        s.mode = "walk";
+        const v = d.unit().scale((s.job ? SPEED : SPEED*0.76)*dt());
+        const np = onFloor(slideAlong(s.gp, v));
+        // ぶつかったら 押しつづけずに 向きを変える
+        let hit = inTable(s.gp.add(v));
+        if(!hit){
+          for(const o of everyone()){
+            if(o === s || !o.gp) continue;
+            const after = np.dist(o.gp);
+            if(after < MIN_GAP*0.9 && after < s.gp.dist(o.gp)){ hit = true; break; }
+          }
+        }
+        // 向きは 行きたい方向ではなく「じっさいに動いた向き」で決める。
+        // ぶつかって 横にすべっている時に 正面歩きのままだと、
+        // 前にしか進めていないように見えてしまう
+        const moved = np.sub(s.gp);
+        walkAnim(s, moved.len() > 1e-3 ? moved : d);
+        if(hit || np.dist(s.gp) < v.len()*0.4){
+          s.stuck = (s.stuck || 0) + dt();
+          if(s.stuck > 0.5){
+            s.stuck = 0;
+            if(!s.inChat && !s.waitSpot && !s.standbySpot) s.target = floorPoint(s);
+          }
+        }else s.stuck = 0;
+        s.gp = np;
+      }
+      stepBody(s);
+    });
+    return s;
+  }
+
+  // ── 仕事を受けとる / 手ばなす ──
+  function takeJob(s, type){
+    if(chat && (chat.a === s || chat.b === s)) endChat();
+    wakeUp(s);
+    s.job = type;
+    s.say = 0;
+    setBubble(s, type);
+    s.target = floorPoint(s);
+  }
+
+  function sparkle(s){
+    for(let i=0;i<3;i++){
+      const star = add([ text("✨",{size:40}),
+        pos(s.gp.add(rand(-46,46), -headOf(s)*0.8 + rand(-20,20))),
+        anchor("center"), z(99999), opacity(1) ]);
+      star.onUpdate(()=>{ star.opacity -= dt()*0.7; star.pos.y -= dt()*22;
+        if(star.opacity<=0) destroy(star); });
+    }
+  }
+
+  // 住人が仕事を終えた時。消えずに、よろこんでから 手あきにもどる
+  function finishJob(s){
+    if(!s.job) return;
+    s.job = null;
+    s.say = 2.2;
+    s.cheerFor = 1.6;
+    setBubble(s, "おわったよ！", rgb(62,180,137));
+    s.play("cheer");
+    sparkle(s);
+    s.rest = 0;
+    s.target = floorPoint(s);
+  }
+
+  // ── 寝る / 起きる ──
+  function sleepDown(s){
+    if(s.mode === "sleep" || s.dying) return;
+    s.mode = "sleep";
+    s.gp = s.bed.clone();
+    s.face = null;
+    s.cheerFor = 0;
+    swapSprite(s, "sleeper", "rest");
+    setBubble(s, "");
+    s.say = 0; s.talkIn = rand(6, 18); s.zzzIn = rand(0.5, 2.0);
+  }
+  function wakeUp(s){
+    if(s.mode !== "sleep") return;
+    s.mode = "idle";
+    swapSprite(s, "slime", "cheer");   // んーっ と のびをする
+    setBubble(s, "");
+    s.say = 0;
+    const h = nowHM()[0];
+    talk(s, (h >= MORNING_FROM && h < MORNING_TO) ? 'おはよう！' : pick(TALK_WAKE));
+    s.rest = 1.0;
+    s.target = floorPoint(s);
+    s.talkIn = rand(10, 22);
+  }
+
+  // ── 出てくる時の「ぽんっ」──
+  function popIn(s){
+    let t = 0;
+    const grow = s.onUpdate(()=>{
+      t += dt();
+      const p = Math.min(1, t/0.34);
+      const e = 1 + Math.sin(p*Math.PI)*0.22;     // ちょっと行き過ぎてから戻る
+      if(p >= 1){ grow.cancel(); return; }
+      s.scale = vec2(SC*p*e, SC*p*e);
+    });
+  }
+
+  // ── 手が足りない時だけ来る、助っ人 ──
+  // 住人3匹より仕事が多い時に現れ、終わると帰っていく
+  function spawnExtra(type){
+    const col = COLOR[type] || 'green';
+    const s = makeSlime(col);
+    s.baseSprite = col;
+    applyTint(s);
+    s.bed = floorPoint(s);
+    s.temp = true;
+    giveLife(s);
+    takeJob(s, type);
+    popIn(s);
+    return s;
+  }
+
+  // 助っ人が帰る
+  function farewell(s){
+    if(!s || s.dying) return;
+    s.dying = true;
+    s.job = null;
+    s.play("cheer");
+    s.say = 99;                     // これ以上しゃべらせない
+    setBubble(s, "おわったよ！", rgb(62,180,137));
+    sparkle(s);
+
+    const startY = s.gp.y;
+    let t = 0;
+    s.onUpdate(()=>{ t += dt();
+      s.gp.y = startY - Math.abs(Math.sin(t*6))*40*Math.max(0,1-t/1.4);
+    });
+    wait(1.3, ()=>{
+      let o = 1;
+      s.onUpdate(()=>{ o -= dt()*1.8;
+        s.opacity=o; s.bub.opacity=o; s.back.opacity=BUB_ALPHA*o; s.shadow.opacity=0.28*o;
+        s.gp.y -= dt()*30;
+        s.tagTxt.opacity = 0.95*o; s.tagBg.opacity = TAG_ALPHA*o;
+        if(s.markBg){ s.markBg.opacity = s.markTip.opacity = s.markTxt.opacity = 0; }
+        if(o<=0){
+          const i = allSlimes.indexOf(s); if(i >= 0) allSlimes.splice(i, 1);
+          destroy(s); destroy(s.bub); destroy(s.back); destroy(s.shadow);
+          destroy(s.tagTxt); destroy(s.tagBg);
+          if(s.markBg){ destroy(s.markBg); destroy(s.markTip); destroy(s.markTxt); }
+        } });
+    });
+  }
+
+  // ───────────────────────────────────────────
+  // 工房のぬし ─ この子は消えない。名札は持たない
+  //   だれも働いていない時は、すみっこで寝て待っている
+  // ───────────────────────────────────────────
+  const NUSHI_HUE = 0;                 // ぬしは もとの色（緑）
+  const nushi = makeSlime(NUSHI_HUE, BED.clone());
+  nushi.isNushi = true;
+  applyTint(nushi);
+  setTag(nushi, "トバ");
+  nushi.bed = BED.clone();
+  nushi.mode = "idle";
+  nushi.target = floorPoint(nushi);
+  giveLife(nushi);
+
+  // ───────────────────────────────────────────
+  // 手あきどうしの おしゃべり
+  // ───────────────────────────────────────────
+  const DIALOGS = [
+    ['ねえねえ','なあに？','なんでもない','えー'],
+    ['おなかすいた','さっき たべたよね','べつばらだよ'],
+    ['きょう なにしてた？','ずっと ぷるぷるしてた','いいなあ'],
+    ['そとって どんなかな','いつか いってみたいね'],
+    ['トバ、はたらきものだね','ぼくらも てつだおう','うん！'],
+    ['ゆま、げんきかな','たぶん げんき','ならいいや'],
+    ['ぷるん','ぷるん','ぷるるん'],
+    ['さっきの しごと どうだった？','ぶじ おわったよ','やったね'],
+    ['この へや ひろいね','はしりまわれる','ぶつからないでね'],
+    ['ひまだね','ひまだね','…ひまだね'],
+  ];
+  // トバが まざる時は 本人の口ぶりで。
+  // さきに話すのは いつも a なので、トバが b の時は
+  // 住人の 呼びかけを ひとつ 前に足して 順ばんを そろえる
+  function pickDialogFor(a, b){
+    if(a.isNushi) return pick(TOBA_TALKS);
+    if(b.isNushi) return [pick(TOBA_CALL)].concat(pick(TOBA_TALKS));
+    return pickDialog();
+  }
+
+  function pickDialog(){
+    const h = nowHM()[0];
+    if(h >= 6  && h < 11 && rand() < 0.5) return ['おはよう','おはよー','よく ねむれた？','ばっちり'];
+    if(h >= 11 && h < 14 && rand() < 0.5) return ['おひるだね','おなかすいた','ゆま ごはん たべたかな'];
+    if(h >= 17 && h < 19 && rand() < 0.5) return ['そと あかいよ','ほんとだ','きれいだね'];
+    if(h >= 19 && h < 24 && rand() < 0.5) return ['よるだね','しずかで すきだな','ぼくも'];
+    return pick(DIALOGS);
+  }
+
+  const CHAT_NEAR = 560;   // このくらいなら 呼びかけて 近づく
+  const CHAT_DIST = 108;   // 話す時の ふたりの間あい。すこし触れるくらい
+  const CHAT_WALK = 6.0;   // 近づくのを あきらめるまで
+  const CHAT_HOLD = 2.6;   // ひとこと ぶんの間
+  let chat = null;
+  let chatCool = 0;
+
+  function everyone(){ return [nushi].concat(Array.from(bySession.values())); }
+  function chatReady(s){
+    return s && !s.job && s.waiting !== "permission" && !s.dying && s.mode !== "sleep" && s.cheerFor <= 0;
+  }
+  function endChat(){
+    if(!chat) return;
+    [chat.a, chat.b].forEach(s=>{ s.inChat = false; s.face = null; s.talkIn = rand(10, 20); });
+    chat = null;
+    chatCool = 4;
+  }
+  function tryStartChat(){
+    if(chat || chatCool > 0) return;
+    const free = everyone().filter(chatReady);
+    for(let i = 0; i < free.length; i++){
+      for(let j = i + 1; j < free.length; j++){
+        if(free[i].gp.dist(free[j].gp) > CHAT_NEAR) continue;
+        chat = { a: free[i], b: free[j], lines: pickDialogFor(free[i], free[j]), i: 0, t: 0, walk: CHAT_WALK };
+        chat.a.inChat = chat.b.inChat = true;
+        return;
+      }
+    }
+  }
+
+  // ── 重ならないように、やんわり押し離す ──
+  // 近くで止まると 体も吹き出しも重なって読めなくなる。
+  // おしゃべり中の間あい(128)より すこし内側から効かせる
+  const MIN_GAP = 132;
+  onUpdate(()=>{
+    for(let i = 0; i < allSlimes.length; i++){
+      const a = allSlimes[i];
+      if(a.dying) continue;
+      for(let j = i + 1; j < allSlimes.length; j++){
+        const b = allSlimes[j];
+        if(b.dying) continue;
+        if(a.inChat && b.inChat) continue;      // 話しているふたりは 近くていい
+        const d = b.gp.sub(a.gp);
+        const L = d.len();
+        if(L >= MIN_GAP || L < 1e-3) continue;
+        const push = d.unit().scale((MIN_GAP - L) * 1.6 * dt());
+        a.gp = onFloor(offTable(a.gp.sub(push)));
+        b.gp = onFloor(offTable(b.gp.add(push)));
+      }
+    }
+  });
+
+  onUpdate(()=>{
+    if(!chat) return;
+    const a = chat.a, b = chat.b;
+    if(!chatReady(a) || !chatReady(b)){ endChat(); return; }
+    a.talkIn = b.talkIn = 99;      // ひとりごとに 割りこませない
+
+    // まずは近づく。離れたまま話していると、会話に見えない。
+    // ここで直接ひっぱると 本人の「うろうろ」と綱引きになるので、
+    // 行き先だけを 待ち合わせ場所に書きかえて、歩くのは本人にまかせる
+    const gap = b.gp.sub(a.gp);
+    if(chat.walk > 0 && gap.len() > CHAT_DIST){
+      chat.walk -= dt();
+      const mid = a.gp.add(gap.scale(0.5));
+      const lr = meetSpots(mid);
+      if(lr){
+        const aLeft = a.gp.x <= b.gp.x;
+        a.target = aLeft ? lr[0] : lr[1];
+        b.target = aLeft ? lr[1] : lr[0];
+      }else{
+        const half = gap.unit().scale(CHAT_DIST/2);
+        a.target = clearOfTable(mid.sub(half));
+        b.target = clearOfTable(mid.add(half));
+      }
+      a.rest = b.rest = 0;
+      return;                     // 着くまでは しゃべらない
+    }
+
+    // 着いたら 立ち止まって、相手の方を向く。
+    // 行き先も 今いる場所にしておかないと、歩きだして 会話に見えない
+    a.target = a.gp.clone(); b.target = b.gp.clone();
+    a.rest = Math.max(a.rest, 0.8);
+    b.rest = Math.max(b.rest, 0.8);
+    a.face = (b.gp.x < a.gp.x) ? "L" : "R";
+    b.face = (a.gp.x < b.gp.x) ? "L" : "R";
+    chat.t -= dt();
+    if(chat.t > 0) return;
+    if(chat.i >= chat.lines.length){ endChat(); return; }
+    const sp = (chat.i % 2 === 0) ? a : b;
+    sp.say = CHAT_HOLD;
+    setBubble(sp, chat.lines[chat.i], rgb(120,132,145));
+    chat.i++;
+    chat.t = CHAT_HOLD + 0.25;
+  });
+
+  // ───────────────────────────────────────────
+  // Claude Code の様子を読みにいく
+  //   動いているセッション 1本 = スライム 1匹
+  // ───────────────────────────────────────────
+  const dot=document.getElementById("dot");
+  const statusEl=document.getElementById("statusTxt");
+  const offline=document.getElementById("offline");
+
+  const legendEl = document.getElementById("legend");
+  const bySession = new Map();   // セッションの id → スライム
+
+  // うごいているセッションの一覧。色の丸で、部屋のスライムと結びつける
+  function renderLegend(visible){
+    legendEl.innerHTML = "";
+    visible.forEach(sess=>{
+      const sl = bySession.get(sess.id);
+      if(!sl) return;
+      const row = document.createElement("div"); row.className = "row";
+      const dot = document.createElement("span"); dot.className = "dot";
+      dot.style.background = hueSwatch(sl.hueIdx);
+      const nm = document.createElement("span"); nm.className = "nm";
+      nm.textContent = sess.name;
+      const st = document.createElement("span");
+      const w = sess.waiting;
+      st.className = "st" + (w === "permission" ? " urg" : w === "reply" ? " wait"
+                             : sess.busy ? "" : " rest");
+      st.textContent = w === "permission" ? "きょかまち"
+                     : w === "reply" ? "おはなししたい"
+                     : sess.busy ? (sess.job || "おしごとちゅう") : "たいき";
+      row.append(dot, nm, st);
+      legendEl.appendChild(row);
+    });
+  }
+  let colorTurn = 0;
+  let pcEverLinked = false;
+  let pageRev = null;      // 画面ファイルの版
+
+  function spawnFor(sess){
+    // ぬしと同じ色にならないよう、1番から順ぐりに配る
+    const hueIdx = 1 + (colorTurn++) % (PACK.hues.length - 1);
+    const s = makeSlime(hueIdx);
+    applyTint(s);
+    s.bed = floorPoint(s);
+    s.sessionId = sess.id;
+    giveLife(s);
+    popIn(s);
+    return s;
+  }
+
+  // セッションの様子を、その子の見た目に映す
+  function applySession(s, sess){
+    if(sess.leaving){
+      // しごとを おえた子。ひとこと言って、そのまま 部屋に いつく
+      if(!s.done){ s.done = true; finishJob(s); }
+      sess = Object.assign({}, sess, { job: null, waiting: null, busy: false });
+    }else s.done = false;
+    s.waiting = sess.waiting || null;
+    setTag(s, sess.tag, s.waiting);
+
+    // 仕事の出入り
+    if(sess.job && !s.job){
+      wakeUp(s);
+      s.job = sess.job;
+      s.say = 0;
+      setBubble(s, sess.job);
+      s.target = floorPoint(s);
+    }else if(!sess.job && s.job && !sess.waiting){
+      finishJob(s);
+    }else if(sess.job && s.job !== sess.job){
+      s.job = sess.job;
+      if(s.say <= 0) setBubble(s, sess.job);
+    }
+
+    if(!s.waiting) s.waitSpot = null;
+
+    // ゆまの番になっている間は、机の前で待つ（場所は poll が配る）
+    if(s.waiting){
+      wakeUp(s);
+      s.lastSay = null;                 // 待ちが解けたら ひとことを出しなおせるように
+      // だまっている間は ことばを消す（名札と しるしが その役をしている）。
+      // おしゃべりの まっ最中なら そのまま しゃべらせる
+      if(s.say <= 0) setBubble(s, "");
+      return;
+    }
+
+    // ひとこと（要点）が来ていたら、しばらくそれを出す
+    if(sess.say && sess.say !== s.lastSay){
+      s.lastSay = sess.say;
+      s.say = 6.5;
+      setBubble(s, sess.say, rgb(96,110,124));
+    }
+  }
+
+  async function readSessions(){
+    try{
+      const r = await fetch("api/status", {cache:"no-store"});
+      const d = await r.json();
+      pcEverLinked = true;
+      offline.style.display = "none";
+      // 画面そのものが新しくなっていたら、だまって読み直す。
+      // 開きっぱなしのスマホが 古い見た目のままにならないように
+      if(d.rev){
+        if(pageRev === null) pageRev = d.rev;
+        else if(d.rev !== pageRev){ location.reload(); }
+      }
+      return d.sessions || [];
+    }catch(e){
+      offline.style.display = pcEverLinked ? "block" : "none";
+      return [];
+    }
+  }
+
+  // ───────────────────────────────────────────
+  // どれを工房によぶか
+  //   工房はせまいので いちどに5ひきまで。
+  //   ふだんは「うごいたばかりの5つ」、選びたい時は名前で指名できる
+  // ───────────────────────────────────────────
+  const VIEW_STORE = "slimekoubou.view.v1";
+  const MAX_CHOICES = [1,2,3,4,5,6,7,8];   // 工房に入る上限
+  let view = { mode: "auto", picked: [], max: 5 };
+  let lastList = [];
+
+  try{
+    const d = JSON.parse(localStorage.getItem(VIEW_STORE) || "null");
+    if(d && (d.mode === "auto" || d.mode === "pick")) view = d;
+    if(!MAX_CHOICES.includes(view.max)) view.max = 5;
+    if(!Array.isArray(view.picked)) view.picked = [];
+  }catch(e){}
+  function saveView(){
+    try{ localStorage.setItem(VIEW_STORE, JSON.stringify(view)); }catch(e){}
+  }
+
+  // 指名はチャット名でおぼえる。id はセッションごとに変わってしまうため
+  function chooseVisible(list){
+    // おわった子も のこす。新しい子に 押し出されるまで 部屋にいる
+    const live = list;
+    if(view.mode === "pick" && view.picked.length){
+      const want = new Set(view.picked);
+      const hit = live.filter(x => want.has(x.name));
+      if(hit.length) return hit.slice(0, view.max);   // 指名したものが1つも居なければ おまかせに戻す
+    }
+    return live.slice(0, view.max);
+  }
+
+  const sheetWrap = document.getElementById("sheetWrap");
+  const sessList  = document.getElementById("sessList");
+  const autoMode  = document.getElementById("autoMode");
+  const autoLabel = document.getElementById("autoLabel");
+  const maxBtns   = document.getElementById("maxBtns");
+  const pickHint  = document.getElementById("pickHint");
+  const hiddenNote= document.getElementById("hiddenNote");
+
+  document.getElementById("pickBtn").addEventListener("click", ()=>{
+    renderPicker(); sheetWrap.classList.add("open");
+  });
+  document.getElementById("sheetClose").addEventListener("click", ()=> sheetWrap.classList.remove("open"));
+  sheetWrap.addEventListener("click", (e)=>{ if(e.target === sheetWrap) sheetWrap.classList.remove("open"); });
+  autoMode.addEventListener("change", ()=>{
+    view.mode = autoMode.checked ? "auto" : "pick";
+    saveView(); renderPicker(); poll();
+  });
+
+  function togglePick(name){
+    const i = view.picked.indexOf(name);
+    if(i >= 0) view.picked.splice(i, 1);
+    else{
+      while(view.picked.length >= view.max) view.picked.shift();   // 古い指名から外す
+      view.picked.push(name);
+    }
+    view.mode = "pick";
+    saveView(); renderPicker(); poll();
+  }
+
+  function renderMaxButtons(){
+    maxBtns.innerHTML = "";
+    MAX_CHOICES.forEach(n=>{
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = n;
+      if(n === view.max) b.className = "on";
+      b.addEventListener("click", ()=>{
+        view.max = n;
+        // 指名が上限より多ければ、古いものから外す
+        while(view.picked.length > view.max) view.picked.shift();
+        saveView(); renderPicker(); poll();
+      });
+      maxBtns.appendChild(b);
+    });
+    autoLabel.textContent = `おまかせ（うごいたばかりの${view.max}つ）`;
+    pickHint.textContent = `いちどに ${view.max}ひき までだよ`;
+  }
+
+  function renderPicker(){
+    autoMode.checked = (view.mode === "auto");
+    renderMaxButtons();
+    sessList.innerHTML = "";
+    const live = lastList.filter(x => !x.leaving);
+    if(!live.length){
+      const p = document.createElement("li");
+      p.className = "empty";
+      p.textContent = "いま うごいているものは ないよ";
+      sessList.appendChild(p);
+      return;
+    }
+    const shown = new Set(chooseVisible(lastList).map(x => x.id));
+    live.forEach(sess=>{
+      const li = document.createElement("li");
+      const on = shown.has(sess.id);
+      if(!on) li.className = "off";
+      const box = document.createElement("input");
+      box.type = "checkbox"; box.checked = on;
+      const nm = document.createElement("span");
+      nm.className = "nm"; nm.textContent = sess.name;
+      const st = document.createElement("span");
+      const w = sess.waiting;
+      st.className = "st" + (w === "permission" ? " urg" : w === "reply" ? " wait"
+                             : sess.busy ? "" : " rest");
+      st.textContent = w === "permission" ? "きょかまち"
+                     : w === "reply" ? "おはなししたい"
+                     : sess.busy ? (sess.job || "おしごとちゅう") : "たいき";
+      li.append(box, nm, st);
+      li.addEventListener("click", (e)=>{ e.preventDefault(); togglePick(sess.name); });
+      sessList.appendChild(li);
+    });
+  }
+
+  async function poll(){
+    const list = await readSessions();
+    lastList = list;
+    const visible = chooseVisible(list);
+    const alive = new Set(visible.map(x => x.id));
+
+    // 見せなくなったセッション → その子は帰る
+    for(const [id, s] of Array.from(bySession)){
+      if(alive.has(id)) continue;
+      bySession.delete(id);
+      farewell(s);
+    }
+    // 新しく見せるセッション → 1匹ふえる
+    visible.forEach(sess=>{
+      let s = bySession.get(sess.id);
+      if(!s){ s = spawnFor(sess); bySession.set(sess.id, s); }
+      applySession(s, sess);
+    });
+
+    // 持ち場を配る。いそぎの順は サーバーの並びをそのまま使う
+    const queue = visible.filter(x => x.waiting === "permission")
+                         .map(x => bySession.get(x.id)).filter(Boolean);
+    queue.forEach((sl, i) => {
+      sl.waitSpot = waitSpot(i, queue.length);
+      sl.standbySpot = null;
+      // 並ぶと吹き出しが横に密集するので、順番ごとに高さをずらす
+      sl.bubLift = i * 26;
+    });
+    const idle = visible.filter(x => !x.waiting && !x.busy)
+                        .map(x => bySession.get(x.id)).filter(Boolean);
+    idle.forEach((sl, i) => {
+      sl.standbySpot = standbySpot(i, idle.length);
+      sl.waitSpot = null;
+      sl.bubLift = i * 26;
+    });
+    // 働きだした子と、おはなししたい子は 持ち場を返して 部屋じゅうを使う。
+    // ここで返さないと、前にならんでいた場所を にぎったまま 動かなくなる
+    bySession.forEach(sl=>{
+      if(sl.waiting === "permission") return;          // きょかまち だけ ならぶ
+      if(!sl.waiting && !sl.job && !sl.dying) return;  // たいきの子は 持ち場のまま
+      sl.waitSpot = sl.standbySpot = null;
+      if(sl.bubLift !== sl.bubBase) sl.bubLift = sl.bubBase;
+    });
+
+    renderLegend(visible);
+
+    if(chatCool > 0) chatCool--;
+    tryStartChat();
+
+    const live = list.filter(x => !x.leaving);
+    const busy = live.filter(x => x.busy).length;
+    const perm = live.filter(x => x.waiting === "permission").length;
+    const rep  = live.filter(x => x.waiting === "reply").length;
+    const hidden = live.length - visible.length;
+    hiddenNote.textContent = hidden > 0 ? `+${hidden}` : "";
+    if(sheetWrap.classList.contains("open")) renderPicker();
+
+    if(live.length > 0){
+      wakeUp(nushi);
+      dot.classList.toggle("on", busy > 0 || perm > 0 || rep > 0);
+      // ゆまの番になっているものを いちばん先に伝える。
+      // 隠れている数は 歯車のバッジが持っているので ここでは言わない
+      let head;
+      if(perm > 0)      head = `<b class="urg">${perm}</b> きょかまち`;
+      else if(rep > 0)  head = `<b>${rep}</b> おはなししたい`;
+      else if(busy > 0) head = `<b>${busy}</b> おしごとちゅう`;
+      else              head = `ぜんぶ たいき`;
+      statusEl.innerHTML = `<b>${live.length}</b> ほん うごいてる ／ ${head}`;
+      dot.classList.toggle("wait", perm > 0 || rep > 0);
+    }else{
+      dot.classList.remove("on");
+      statusEl.textContent = "うごいているものは ないよ";
+      sleepDown(nushi);
+    }
+  }
+  poll();
+  setInterval(poll, 2500);
+
+  // ── ウィジェット姿かどうか ──
+  // デスクトップに置く時は 見出しも一覧も出さず、部屋だけを 背景ぬきで見せる
+  if(/[?&]widget/.test(location.search)){
+    document.body.classList.add("widget");
+    document.getElementById("wclose").addEventListener("click", ()=>{
+      try{ window.pywebview.api.quit(); }catch(e){ window.close(); }
+    });
+  }
+
+  // ── ホーム画面アプリの係を登録する ──
+  // 「安全なつながり」でないと使えない決まりなので、使える時だけ静かに登録する。
+  // （PCの127.0.0.1 は使える／おうちWiFiのIPだと使えない）
+  if ("serviceWorker" in navigator && window.isSecureContext) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(()=>{});
+    });
+  }
+
+  // ── スマホで開くための案内（PCで見ている時だけ出す）──
+  (async ()=>{
+    const btn  = document.getElementById("phoneBtn");
+    const wrap = document.getElementById("qrWrap");
+    const onPC = ["127.0.0.1","localhost"].includes(location.hostname);
+    if(!onPC) return;                       // すでにスマホ側で見ている
+    let info;
+    try{ info = await (await fetch("api/info",{cache:"no-store"})).json(); }
+    catch(e){ return; }
+    if(!info.phone_url) return;
+    document.getElementById("phoneUrl").textContent = info.phone_url;
+    if(info.qr) document.getElementById("qrPair").src = "/qr_pair.svg";
+    const img = document.getElementById("qr");
+    if(info.qr) img.src = "qr.svg"; else img.remove();
+    btn.hidden = false;
+    btn.addEventListener("click", ()=> wrap.classList.add("open"));
+    document.getElementById("qrClose").addEventListener("click", ()=> wrap.classList.remove("open"));
+    wrap.addEventListener("click", (e)=>{ if(e.target === wrap) wrap.classList.remove("open"); });
+  })();
+
+  })();
+  </script>
+</body>
+</html>

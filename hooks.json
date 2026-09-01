@@ -1,0 +1,121 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=prompt\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=pre\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=post\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=post\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=stop\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=start\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=end\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=perm\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=notify\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -76,6 +76,17 @@
             "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=start\" >/dev/null 2>&1 || true"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 5,
+            "command": "S=$(ls -t \"$APPDATA\"/Claude/claude-code-sessions/*/*/scheduled-tasks.json 2>/dev/null | head -1); [ -n \"$S\" ] && cp \"$S\" \"$HOME/.claude/scheduled-tasks/_mirror.json\"; true"
+          }
+        ]
       }
     ],
     "SessionEnd": [

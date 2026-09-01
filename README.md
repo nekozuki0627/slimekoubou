@@ -33,6 +33,9 @@ git clone https://github.com/nekozuki0627/slimekoubou.git
 これで Claude Code の 9つの出来事（ツール使用・許可待ち・停止など）が
 ローカルの 8899 番に POST されます。**外部には 一切 送信されません。**
 
+`hooks.json` の SessionStart には、定期タスクの一覧を読める場所へ写す一行も入っています。
+Windows のストア版 Python からは `%APPDATA%\Claude` が見えないためです。
+
 ### 3. 起動する
 
 ```bash

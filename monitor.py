@@ -312,7 +312,8 @@ def snapshot():
             return 3        # まだ 生きている
         return 4            # おわった子。押し出されるのは この子から
     out.sort(key=lambda x: (rank(x), x["idle"]))
-    return {"sessions": out, "total": len(out), "rev": page_rev()}
+    return {"sessions": out, "total": len(out), "rev": page_rev(),
+            "soon": next_task()}
 
 
 def page_rev():
@@ -475,6 +476,133 @@ def bridge_ids():
         pass
     _BRIDGE = out
     return out
+
+
+# ── 時間で うごく しごと（定期タスク） ──
+_TASKS = []
+_TASKS_AT = 0.0
+
+
+def _task_store():
+    """定期タスクの おきば。Claude の 保存フォルダの 中にある"""
+    import glob
+    base = os.environ.get("APPDATA") or os.path.join(
+        os.path.expanduser("~"), "AppData", "Roaming")
+    found = glob.glob(os.path.join(
+        base, "Claude", "claude-code-sessions", "*", "*", "scheduled-tasks.json"))
+    # Windows ストア版の Python からは AppData の中の Claude が 見えない。
+    # そのため フックで ここに 写しを 置いてもらっている
+    mirror = os.path.join(os.path.expanduser("~"), ".claude",
+                          "scheduled-tasks", "_mirror.json")
+    if os.path.exists(mirror):
+        found.append(mirror)
+    return found
+
+
+def _cron_next(expr, now):
+    """
+    かんたんな cron（分 時 日 月 曜）から、つぎに 動く時刻を さがす。
+    1分ずつ 8日先まで 見る。むずかしい書きかたには 対応しない
+    """
+    import datetime
+    parts = expr.split()
+    if len(parts) < 5:
+        return None
+
+    def hit(field, val, lo, hi):
+        if field == "*":
+            return True
+        for part in field.split(","):
+            if part.startswith("*/"):
+                try:
+                    if (val - lo) % int(part[2:]) == 0:
+                        return True
+                except ValueError:
+                    pass
+            elif "-" in part:
+                try:
+                    a, b = part.split("-")
+                    if int(a) <= val <= int(b):
+                        return True
+                except ValueError:
+                    pass
+            else:
+                try:
+                    if int(part) == val:
+                        return True
+                except ValueError:
+                    pass
+        return False
+
+    t = datetime.datetime.fromtimestamp(now).replace(second=0, microsecond=0)
+    t += datetime.timedelta(minutes=1)
+    for _ in range(8 * 24 * 60):
+        dow = (t.weekday() + 1) % 7          # cron は 日曜が 0
+        if (hit(parts[0], t.minute, 0, 59) and hit(parts[1], t.hour, 0, 23)
+                and hit(parts[2], t.day, 1, 31) and hit(parts[3], t.month, 1, 12)
+                and hit(parts[4], dow, 0, 6)):
+            return t.timestamp()
+        t += datetime.timedelta(minutes=1)
+    return None
+
+
+def _task_label(path):
+    """SKILL.md の 頭に 書いてある せつめいを 短く"""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            head = f.read(600)
+    except Exception:
+        return ""
+    for line in head.splitlines():
+        if line.startswith("description:"):
+            t = line.split(":", 1)[1].strip()
+            return t[:12] + ("…" if len(t) > 12 else "")
+    return ""
+
+
+def next_task():
+    """つぎに 動く 定期タスク。{when, label} か None"""
+    global _TASKS, _TASKS_AT
+    import json as _json
+    now = time.time()
+    if now - _TASKS_AT < 60.0:
+        return _TASKS
+    _TASKS_AT = now
+
+    best = None
+    for path in _task_store():
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                data = _json.load(f)
+        except Exception:
+            continue
+        for t in data.get("scheduledTasks", []):
+            if not t.get("enabled"):
+                continue
+            at = None
+            if t.get("fireAt"):
+                at = t["fireAt"] / 1000.0
+            elif t.get("cronExpression"):
+                at = _cron_next(t["cronExpression"], now)
+            if at is None or at < now:
+                continue
+            if best is None or at < best[0]:
+                best = (at, t)
+    if best is None:
+        _TASKS = None
+        return None
+
+    at, t = best
+    lt = time.localtime(at)
+    today = time.localtime(now)
+    if lt.tm_yday == today.tm_yday and lt.tm_year == today.tm_year:
+        when = time.strftime("%H:%M", lt)
+    elif at - now < 36 * 3600:
+        when = "あした " + time.strftime("%H:%M", lt)
+    else:
+        when = time.strftime("%m/%d %H:%M", lt).lstrip("0")
+    _TASKS = {"when": when, "label": _task_label(t.get("filePath", ""))}
+    return _TASKS
 
 
 def ts_ip():

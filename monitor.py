@@ -210,6 +210,68 @@ def _touch(sid, payload):
     return s
 
 
+# ── おぼえておく ──
+# サーバーを 入れなおしたり パソコンを 再起動しても、
+# さっきまでの スライムが 部屋に のこるように、
+# セッションの ようすを ファイルに 書いておく
+STATE = os.path.join(HERE, "_state.json")
+STATE_KEEP = 30                 # 多くても これだけ おぼえる
+_state_at = 0.0
+
+
+def save_state(force=False):
+    global _state_at
+    now = time.time()
+    if not force and now - _state_at < 20.0:
+        return
+    _state_at = now
+    try:
+        with _lock:
+            items = sorted(_sessions.items(),
+                           key=lambda kv: kv[1].get("last", 0), reverse=True)
+            keep = {}
+            for sid, s in items[:STATE_KEEP]:
+                d = dict(s)
+                # 動いている とちゅうの ぶんは 持ちこさない。
+                # 入れなおした後は「おわった子」として 部屋に のこる
+                d["busy"] = 0
+                d["job"] = None
+                d["job_until"] = 0.0
+                d["waiting"] = None
+                if d.get("ended") is None:
+                    d["ended"] = now
+                keep[sid] = d
+        tmp = STATE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"saved": now, "sessions": keep}, f, ensure_ascii=False)
+        os.replace(tmp, STATE)
+    except Exception:
+        pass
+
+
+def load_state():
+    """前に 書いておいた ようすを 読みもどす"""
+    try:
+        with open(STATE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return 0
+    now = time.time()
+    n = 0
+    for sid, s in (d.get("sessions") or {}).items():
+        if now - s.get("last", 0) > SESSION_GONE:
+            continue
+        s["busy"] = 0
+        s["job"] = None
+        s["job_until"] = 0.0
+        s["waiting"] = None
+        if s.get("ended") is None:
+            s["ended"] = now
+        _sessions[sid] = s
+        n += 1
+    return n
+
+
 def on_hook(event, payload):
     """Claude Code から届いた合図を、スライムの様子に翻訳する"""
     sid = payload.get("session_id") or "unknown"
@@ -217,6 +279,9 @@ def on_hook(event, payload):
     now = time.time()
     with _lock:
         s = _touch(sid, payload)
+        # 何か 合図が 来たなら まだ 生きている
+        if event not in ("end",):
+            s["ended"] = None
         if event == "start":
             s["ended"] = None
             s["waiting"] = None
@@ -259,6 +324,7 @@ def on_hook(event, payload):
 
 
 def snapshot():
+    save_state()
     bridge = bridge_ids()
     """いま画面に出すべき、セッションの一覧"""
     now = time.time()
@@ -688,6 +754,10 @@ def main():
         print(f"ポート {PORT} が使えませんでした: {e}")
         return
 
+    back = load_state()
+    if back:
+        print(f"  まえの ようすを {back} ほん 読みもどしました")
+
     local = f"http://127.0.0.1:{PORT}/"
     phone = f"http://{phone_ip()}:{PORT}/"
     print("=" * 52)
@@ -709,6 +779,7 @@ def main():
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
+        save_state(force=True)
         print("\n終了しました")
 
 

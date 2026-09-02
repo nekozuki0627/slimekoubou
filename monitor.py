@@ -425,11 +425,75 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    # ── だれから 来た お願いか ──
+    def _local(self):
+        """このPCの中から きた か。ここからは いつでも ぜんぶ 見せる"""
+        ip = (self.client_address or ("",))[0]
+        return ip in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+
+    def _key(self):
+        """お願いに ついてきた 合言葉"""
+        k = self.headers.get("X-Slime-Key")
+        if k:
+            return k.strip()
+        from urllib.parse import urlparse, parse_qs
+        return (parse_qs(urlparse(self.path).query).get("t") or [""])[0].strip()
+
+    def _allowed(self):
+        """ほかの機械から でも 見せていいか。
+        だめな時は こちらで 返事まで して False を かえす"""
+        if self._local():
+            return True
+        if not SHARE:
+            self._send(403, json.dumps(
+                {"error": "closed",
+                 "msg": "このPCの設定で「スマホから 見る」が 入っていません"},
+                ensure_ascii=False))
+            return False
+        import hmac
+        if not TOKEN or not hmac.compare_digest(self._key(), TOKEN):
+            self._send(401, json.dumps(
+                {"error": "key", "msg": "合言葉が ちがいます。QRを 読みなおしてください"},
+                ensure_ascii=False))
+            return False
+        return True
+
     def do_POST(self):
         from urllib.parse import urlparse, parse_qs
         u = urlparse(self.path)
+        # やり残しの チェックだけは スマホからも 受ける
+        if u.path == "/api/todo/done":
+            if not self._allowed():
+                return
+            from urllib.parse import parse_qs as _pq
+            tid = (_pq(u.query).get("id") or [""])[0]
+            ok = done_todo(tid)
+            return self._send(200 if ok else 404, json.dumps({"ok": ok}))
+        # 工房の 中身を 書きかえる ところ。このPCの中からだけ
+        if u.path == "/api/config":
+            if not self._local():
+                return self._send(403, json.dumps({"error": "local only"}))
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
+            except Exception:
+                body = {}
+            ch = {}
+            if "share" in body:
+                ch["share"] = bool(body["share"])
+            if body.get("show") in ("all", "work", "name"):
+                ch["show"] = body["show"]
+            if ch:
+                save_config(**ch)
+                load_config()
+            return self._send(200, json.dumps(
+                {"share": SHARE, "show": SHOW}, ensure_ascii=False))
+        # しごとの しらせ（フック）は このPCの中からしか 受けない。
+        # 開けておくと、同じWiFiの だれかが うその しごとを 送りこめる
         if u.path != "/api/hook":
             return self._send(404, "not found", "text/plain; charset=utf-8")
+        if not self._local():
+            return self._send(403, "local only", "text/plain; charset=utf-8")
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(n) if n else b""
         try:
@@ -450,30 +514,39 @@ class Handler(BaseHTTPRequestHandler):
         from urllib.parse import unquote
         path = unquote(self.path.split("?")[0])
         if path in ("/", "/index.html"):
+            # 画面そのものは だれが 見ても かまわない（中身は 入っていない）。
+            # 中身を もらう時に あらためて 合言葉を みる
             return self._file("index.html", "text/html; charset=utf-8")
         if path == "/api/status":
-            return self._send(200, json.dumps(snapshot(), ensure_ascii=False))
+            if not self._allowed():
+                return
+            snap = snapshot()
+            if not self._local():
+                snap = trim(snap, SHOW)
+            return self._send(200, json.dumps(snap, ensure_ascii=False))
         if path == "/api/info":
-            return self._send(200, json.dumps({
-                "phone_url": f"http://{phone_ip()}:{PORT}/",
-                "pair_url": pair_url(),
-                "qr": qr_svg() is not None,
-                "you": USER_NAME,
-            }, ensure_ascii=False))
-        if path == "/api/todo/done":
-            from urllib.parse import parse_qs
-            q = parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
-            tid = (q.get("id") or [""])[0]
-            ok = done_todo(tid)
-            return self._send(200 if ok else 404,
-                              json.dumps({"ok": ok}), "application/json; charset=utf-8")
+            if not self._allowed():
+                return
+            out = {"you": USER_NAME}
+            if self._local():
+                # 住所と 合言葉は このPCの画面にだけ 見せる
+                out["phone_url"] = f"http://{phone_ip()}:{PORT}/?t={urllib.parse.quote(TOKEN)}"
+                out["pair_url"] = pair_url()
+                out["qr"] = qr_svg() is not None
+                out["share"] = SHARE
+                out["show"] = SHOW
+            return self._send(200, json.dumps(out, ensure_ascii=False))
         if path == "/qr_pair.svg":
+            if not self._local():
+                return self._send(403, "local only", "text/plain; charset=utf-8")
             svg = qr_svg(pair_url())
             if svg is None:
                 return self._send(404, "no qr", "text/plain; charset=utf-8")
             return self._send(200, svg, "image/svg+xml; charset=utf-8")
         if path == "/qr.svg":
-            svg = qr_svg()
+            if not self._local():
+                return self._send(403, "local only", "text/plain; charset=utf-8")
+            svg = qr_svg(f"http://{phone_ip()}:{PORT}/?t={urllib.parse.quote(TOKEN)}")
             if svg is None:
                 return self._send(404, "no qr", "text/plain; charset=utf-8")
             return self._send(200, svg, "image/svg+xml; charset=utf-8")
@@ -782,14 +855,63 @@ TODO_MARK = "@me"
 # このPCで 見る どの画面でも 同じ 呼び名に なる（画面ごとに 入れなおさずに すむ）
 USER_NAME = ""
 
-try:
-    with open(os.path.join(HERE, "_config.json"), "r", encoding="utf-8") as _f:
-        _cfg = json.load(_f)
-    TODO_FILE = os.path.expanduser(_cfg.get("todo_file") or TODO_FILE)
-    TODO_MARK = _cfg.get("todo_mark") or TODO_MARK
-    USER_NAME = (_cfg.get("user_name") or "").strip()
-except Exception:
-    pass
+# ── ほかの機械から 見られないように する ──
+# この工房が 出すのは「いま どの しごとを していて、なにを 待っているか」。
+# 名前も やり残しも そのまま 出るので、同じWiFiに いる だれかに
+# 読まれると こまる。だから：
+#
+#   このPCの中（127.0.0.1）から  … いつでも ぜんぶ 見せる
+#   ほかの機械から              … SHARE が 入っていて、合言葉が 合った時だけ
+#
+# 合言葉は はじめて うごかした時に 作って _config.json に しまう。
+# QRに 混ぜてあるので、スマホは 読みとるだけで 入る
+CONFIG = os.path.join(HERE, "_config.json")
+SHARE = False           # スマホから 見るか
+SHOW = "all"            # スマホに 見せるもの all / work / name
+TOKEN = ""              # 合言葉
+
+
+def load_config():
+    global TODO_FILE, TODO_MARK, USER_NAME, SHARE, SHOW, TOKEN
+    d = {}
+    try:
+        with open(CONFIG, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        d = {}
+    TODO_FILE = os.path.expanduser(d.get("todo_file") or TODO_FILE)
+    TODO_MARK = d.get("todo_mark") or TODO_MARK
+    USER_NAME = (d.get("user_name") or "").strip()
+    SHARE = bool(d.get("share"))
+    SHOW = d.get("show") if d.get("show") in ("all", "work", "name") else "all"
+    TOKEN = (d.get("token") or "").strip()
+    if not TOKEN:
+        import secrets
+        TOKEN = secrets.token_urlsafe(18)
+        save_config(token=TOKEN)
+    return d
+
+
+def save_config(**changes):
+    """いま書いてあるものを こわさずに、変えたぶんだけ 書きかえる"""
+    d = {}
+    try:
+        with open(CONFIG, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        d = {}
+    d.update(changes)
+    try:
+        tmp = CONFIG + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, CONFIG)
+        return True
+    except Exception:
+        return False
+
+
+load_config()
 
 _TODO_LINE = re.compile(r"^\s*[-*]\s*\[( |x|X)\]\s*(.+?)\s*$")
 
@@ -892,14 +1014,40 @@ def phone_ip():
     return ts_ip() or lan_ip()
 
 
+def trim(snap, level):
+    """ほかの機械へ わたす ぶんを、えらんだ ところまで けずる。
+    このPCの画面には ぜんぶ 出したままに したいので、渡す時だけ けずる"""
+    out = dict(snap)
+    if level == "all":
+        # ぜんぶ 見せる ときでも、PCの中の フォルダ名までは 出さない
+        out["sessions"] = [{k: v for k, v in x.items() if k != "folder"}
+                           for x in snap.get("sessions", [])]
+        return out
+    out["todo"] = []          # やり残しは 中身が 生なので まっさきに 落とす
+    out["todoCount"] = 0
+    out["soon"] = None        # よていの 見出しも 用件そのもの
+    ss = []
+    for x in snap.get("sessions", []):
+        y = dict(x)
+        y["say"] = None                       # ひとことは 会話の 中身そのもの
+        if level == "name":
+            y["job"] = None                   # なにを しているかも 伏せる
+        y.pop("folder", None)
+        y.pop("cloud", None)
+        ss.append(y)
+    out["sessions"] = ss
+    return out
+
+
 def pair_url():
     """
     アプリに 住所を わたす ための リンク。
     スマホの ふつうのカメラで 読みとると、そのまま アプリが ひらいて
     住所が 入る。アプリに カメラを つけなくて すむ
     """
-    return "slimekoubou://pair?host=" + urllib.parse.quote(
-        "http://%s:%d" % (phone_ip(), PORT), safe="")
+    return ("slimekoubou://pair?host="
+            + urllib.parse.quote("http://%s:%d" % (phone_ip(), PORT), safe="")
+            + "&key=" + urllib.parse.quote(TOKEN, safe=""))
 
 
 def qr_svg(url=None):

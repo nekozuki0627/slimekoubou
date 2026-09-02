@@ -157,6 +157,8 @@
     border:1px solid #ddd3c2;border-radius:10px;padding:9px 18px;cursor:pointer}
   .cfgBody .tog.on{background:#3eb489;border-color:#3eb489;color:#fff;font-weight:600}
   .swatch{display:flex;gap:8px;overflow-x:auto;padding:3px 2px 6px}
+  /* display を 決めうちした ところは hidden が 効かないので、こちらで 勝たせる */
+  [hidden]{display:none !important}
   .swatch button{flex:none;width:54px;height:54px;border-radius:12px;cursor:pointer;
     border:3px solid #d6d1c6;background:#fcfaf4;padding:0;
     display:flex;align-items:center;justify-content:center}
@@ -242,6 +244,17 @@
         <div class="sec">やり残しの おしらせ</div>
         <p class="note">あなたでないと できないことを 部屋の外に 出します</p>
         <button class="tog" id="tdBtn" type="button"></button>
+
+        <div class="sec">スマホから 見る</div>
+        <p class="note">このPCの画面だけで いいなら「見ない」が いちばん 安全です</p>
+        <button class="tog" id="shareBtn" type="button">見ない</button>
+        <p class="note" id="shareWhy" hidden>同じWiFiの スマホから 見られるように なります。
+          ほかの人に 見られないよう 合言葉が つきます。
+          QRを 読みとれば スマホに 自動で 入ります</p>
+
+        <div class="sec" id="showSec" hidden>スマホに 見せる もの</div>
+        <div class="swatch" id="showRow" hidden></div>
+        <p class="note" id="showWhy" hidden></p>
 
         <div class="sec">あなたの 呼び名</div>
         <p class="note">スライムが あなたを 呼ぶときに 使います</p>
@@ -416,6 +429,31 @@
   //   かべがみアプリと 同じ ことば・同じ ならびに そろえてある。
   //   どちらで 見ても 同じ名前で 同じものを さわれるように
   // ───────────────────────────────────────────
+  // ── 合言葉 ──
+  // このPCの画面から 聞く時は 要らない。
+  // スマホの ブラウザから 見る時だけ、QRに 入っていた 合言葉を そえる。
+  // （工房は このPCの中からの お願いだけ 素通しにしている）
+  const KEY_STORE = "slimekoubou.key.v1";
+  let apiKey = "";
+  try{
+    const fromUrl = new URLSearchParams(location.search).get("t");
+    if(fromUrl){
+      apiKey = fromUrl;
+      localStorage.setItem(KEY_STORE, apiKey);
+      // 住所の 見た目から 合言葉を 消す（人に 見せても もれないように）
+      history.replaceState(null, "", location.pathname);
+    }else{
+      apiKey = localStorage.getItem(KEY_STORE) || "";
+    }
+  }catch(e){}
+
+  /** 工房に 聞く。合言葉が あれば そえる */
+  function ask(path, opt){
+    const o = Object.assign({cache:"no-store"}, opt || {});
+    if(apiKey) o.headers = Object.assign({"X-Slime-Key": apiKey}, o.headers || {});
+    return fetch(path, o);
+  }
+
   const CFG_STORE = "slimekoubou.cfg.v1";
   const HUE_NAMES = ["みどり","みずいろ","あお","あおむらさき","むらさき",
                      "ももいろ","あか","だいだい","きみどり","わかくさ"];
@@ -442,8 +480,13 @@
 
   (async ()=>{
     try{
-      const d = await (await fetch("api/info", {cache:"no-store"})).json();
+      const d = await (await ask("api/info")).json();
       if(d && d.you) youFromPC = String(d.you).trim();
+      if(d && typeof d.share === "boolean"){
+        share = d.share;
+        if(d.show) showLv = d.show;
+        paintShare();
+      }
     }catch(e){}
   })();
 
@@ -1741,7 +1784,8 @@
       btn.className = "done"; btn.type = "button";
       btn.textContent = "✓"; btn.title = "おわった";
       btn.onclick = ()=>{
-        fetch("/api/todo/done?id=" + encodeURIComponent(t.id)).then(()=> poll());
+        ask("api/todo/done?id=" + encodeURIComponent(t.id), {method:"POST"})
+          .then(()=> poll());
       };
       // どの スライムの しごとか、色の丸で 結びつける
       const sl = t.tag ? Array.from(bySession.values()).find(x => x.tagTxt
@@ -1845,7 +1889,7 @@
 
   async function readSessions(){
     try{
-      const r = await fetch("api/status", {cache:"no-store"});
+      const r = await ask("api/status");
       const d = await r.json();
       lastRaw = d;                      // todo など 一覧いがいの ぶんも 使う
       pcEverLinked = true;
@@ -1993,6 +2037,57 @@
     "変える", "変えない");
   toggle("tdBtn", ()=> cfg.showTodo, (v)=>{ cfg.showTodo = v; renderTodo(lastRaw ? lastRaw.todo : null); },
     "出す", "出さない");
+
+  // ── スマホから 見る ──
+  // ここだけは この画面の おぼえ書きではなく、工房（PC）の 設定を 変える。
+  // 見せる か どうかを 決めるのは 工房のがわ なので
+  const SHOW_LEVELS = [
+    ["名前だけ", "name", "だれが うごいているか だけ。中身は 出しません"],
+    ["仕事まで", "work", "なにを しているかも。ひとことと やり残しは 出しません"],
+    ["ぜんぶ",   "all",  "ひとことも やり残しも 出します"],
+  ];
+  let share = false, showLv = "all";
+  const shareBtn = document.getElementById("shareBtn");
+  const shareWhy = document.getElementById("shareWhy");
+  const showSec = document.getElementById("showSec");
+  const showRow = document.getElementById("showRow");
+  const showWhy = document.getElementById("showWhy");
+
+  function paintShare(){
+    shareBtn.textContent = share ? "見る" : "見ない";
+    shareBtn.classList.toggle("on", share);
+    shareWhy.hidden = share;
+    showSec.hidden = showRow.hidden = showWhy.hidden = !share;
+    const cur = SHOW_LEVELS.find(x => x[1] === showLv) || SHOW_LEVELS[2];
+    showWhy.textContent = cur[2];
+    Array.from(showRow.children).forEach((b, i)=>
+      b.classList.toggle("on", SHOW_LEVELS[i][1] === showLv));
+    const btn = document.getElementById("phoneBtn");
+    if(btn) btn.hidden = !share;
+  }
+
+  async function sendShare(ch){
+    try{
+      const r = await ask("api/config", {
+        method: "POST", body: JSON.stringify(ch),
+        headers: {"Content-Type": "application/json"},
+      });
+      const d = await r.json();
+      if(typeof d.share === "boolean") share = d.share;
+      if(d.show) showLv = d.show;
+    }catch(e){}
+    paintShare();
+  }
+
+  SHOW_LEVELS.forEach(([nm, lv])=>{
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = nm;
+    b.style.cssText = "width:auto;padding:0 16px;height:44px;font:inherit;font-size:14px;color:#4a5560";
+    b.addEventListener("click", ()=> sendShare({show: lv}));
+    showRow.appendChild(b);
+  });
+  shareBtn.addEventListener("click", ()=> sendShare({share: !share}));
+  paintShare();
 
   // あなたの 呼び名
   const youName = document.getElementById("youName");
@@ -2236,14 +2331,16 @@
     const onPC = ["127.0.0.1","localhost"].includes(location.hostname);
     if(!onPC) return;                       // すでにスマホ側で見ている
     let info;
-    try{ info = await (await fetch("api/info",{cache:"no-store"})).json(); }
+    try{ info = await (await ask("api/info")).json(); }
     catch(e){ return; }
     if(!info.phone_url) return;
     document.getElementById("phoneUrl").textContent = info.phone_url;
     if(info.qr) document.getElementById("qrPair").src = "/qr_pair.svg";
     const img = document.getElementById("qr");
     if(info.qr) img.src = "qr.svg"; else img.remove();
-    btn.hidden = false;
+    // 「スマホから 見る」が 入っていない間は QRを 出さない
+    // （QRには 合言葉が 入っているし、出しても つながらない）
+    btn.hidden = !share;
     btn.addEventListener("click", ()=> wrap.classList.add("open"));
     document.getElementById("qrClose").addEventListener("click", ()=> wrap.classList.remove("open"));
     wrap.addEventListener("click", (e)=>{ if(e.target === wrap) wrap.classList.remove("open"); });

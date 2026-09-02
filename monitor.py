@@ -199,7 +199,7 @@ def _touch(sid, payload):
         s = _sessions[sid] = {
             "started": now, "busy": 0, "job": None, "job_until": 0.0,
             "ended": None, "say": None, "say_at": 0.0, "title": None,
-            # ゆまの番になっている状態： None / "reply"(へんじまち) / "permission"(きょかまち)
+            # つかい手の番になっている状態： None / "reply"(へんじまち) / "permission"(きょかまち)
             "waiting": None, "waiting_at": 0.0,
         }
     s["last"] = now
@@ -289,7 +289,7 @@ def on_hook(event, payload):
             s["ended"] = now
             s["waiting"] = None
         elif event == "prompt":
-            # ゆまが返事した → 待ちは解ける
+            # つかい手が返事した → 待ちは解ける
             s["ended"] = None
             s["waiting"] = None
             s["job"] = THINKING
@@ -300,7 +300,7 @@ def on_hook(event, payload):
             s["job"] = tool_job(tool)
             s["job_until"] = now + BUSY_HOLD
         elif event == "perm":
-            # 許可を求めて止まっている。ゆまが答えるまで進めない
+            # 許可を求めて止まっている。つかい手が答えるまで進めない
             s["waiting"] = "permission"
             s["waiting_at"] = now
         elif event == "notify":
@@ -315,7 +315,7 @@ def on_hook(event, payload):
                 s["job"] = THINKING
                 s["job_until"] = now + BUSY_HOLD
         elif event == "stop":
-            # ひと区切り。ここからは ゆまの番
+            # ひと区切り。ここからは つかい手の番
             s["busy"] = 0
             s["job"] = None
             s["job_until"] = 0.0
@@ -653,7 +653,7 @@ def task_ids():
     時間で うごく しごとが 立てた セッションは、
     会話の名まえが その まま タスクの名まえに なるので、
     それを 手がかりに スライムから 外す
-    （スライム＝ゆまが 話している セッション、という決まりを 守るため）
+    （スライム＝つかい手が 話している セッション、という決まりを 守るため）
     """
     import json as _json
     out = set()

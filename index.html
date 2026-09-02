@@ -106,13 +106,45 @@
     padding:5px 8px;pointer-events:none}
   body.widget .status{font-size:12px;color:#46525e;
     background:rgba(255,255,255,.78);border-radius:999px;padding:4px 11px}
-  body.widget .gear{display:none}
+  /* ウィジェット姿でも 設定は 出す。乗せた時だけ うっすら出る */
+  body.widget .gear{display:flex;opacity:0;transition:.2s}
+  body.widget:hover .gear{opacity:1}
   .wclose{position:fixed;right:5px;top:3px;z-index:60;width:26px;height:26px;
     border:0;border-radius:50%;cursor:pointer;font:inherit;font-size:15px;
     color:#6b7681;background:rgba(255,255,255,.75);opacity:0;transition:.2s;
     display:none;align-items:center;justify-content:center;padding:0}
   body.widget .wclose{display:flex}
   body.widget:hover .wclose{opacity:1}
+  /* まどの 右下の すみ。枠なしの窓には ふちが無いので 自分で 用意する */
+  .wgrip{position:fixed;right:0;bottom:0;z-index:60;width:28px;height:28px;
+    cursor:nwse-resize;display:none;opacity:0;transition:.2s}
+  .wgrip::after{content:"";position:absolute;right:6px;bottom:6px;width:12px;height:12px;
+    border-right:2px solid #8c98a3;border-bottom:2px solid #8c98a3;border-radius:0 0 3px 0}
+  body.widget .wgrip{display:block}
+  body.widget:hover .wgrip{opacity:.85}
+
+  /* せってい。かべがみアプリと 同じ ならび・同じ ことば */
+  .sheet.cfg{max-height:86vh}
+  .cfgBody{overflow-y:auto;flex:1;min-height:0;padding-right:4px}
+  .cfgBody .sec{font-size:14px;font-weight:600;color:#4a5560;margin:20px 0 3px}
+  .cfgBody .sec:first-child{margin-top:0}
+  .cfgBody .note{font-size:12px;color:#aab0a4;line-height:1.5;margin:0 0 5px}
+  .cfgBody .val{font-size:13px;color:#7d8a72;margin:2px 0 7px}
+  .cfgBody input[type=range]{width:100%;accent-color:#3eb489;margin:0}
+  .cfgBody input.nmbox{width:100%;font:inherit;font-size:15px;color:#4a5560;
+    border:1px solid #ddd3c2;border-radius:10px;padding:9px 11px;background:#fff}
+  .cfgBody .tog{font:inherit;font-size:14px;color:#4a5560;background:#fff;
+    border:1px solid #ddd3c2;border-radius:10px;padding:9px 18px;cursor:pointer}
+  .cfgBody .tog.on{background:#3eb489;border-color:#3eb489;color:#fff;font-weight:600}
+  .swatch{display:flex;gap:8px;overflow-x:auto;padding:3px 2px 6px}
+  .swatch button{flex:none;width:54px;height:54px;border-radius:12px;cursor:pointer;
+    border:3px solid #d6d1c6;background:#fcfaf4;padding:0;
+    display:flex;align-items:center;justify-content:center}
+  .swatch button.on{border-color:#3eb489}
+  .swatch button img{width:40px;height:40px;object-fit:contain}
+  .swatch button .none{font-size:11px;color:#a8b3bd}
+  .cfgBody ul{max-height:32vh}
+  body:not(.widget) .cfgBody .win{display:none}
   .offline{position:fixed;left:0;right:0;top:0;background:#ffe4e1;color:#a35;text-align:center;
     font-size:12px;padding:calc(6px + env(safe-area-inset-top)) 6px 6px;display:none;z-index:30}
 
@@ -155,6 +187,7 @@
     <button class="gear" id="pickBtn" aria-label="セッションのせってい">⚙<b id="hiddenNote"></b></button>
   </header>
   <button class="wclose" id="wclose" aria-label="とじる">×</button>
+  <div class="wgrip" id="wgrip" title="ひっぱって まどの 大きさを 変える"></div>
   <main><canvas id="game"></canvas></main>
 
   <footer>
@@ -166,13 +199,59 @@
   </footer>
 
   <div class="sheetWrap" id="sheetWrap">
-    <div class="sheet">
-      <h2>どれを 工房に よぶ？<button type="button" id="sheetClose" aria-label="とじる">×</button></h2>
-      <div class="num">なんびき よぶ？<span class="btns" id="maxBtns"></span></div>
-      <label class="auto"><input type="checkbox" id="autoMode">
-        <span id="autoLabel">おまかせ</span></label>
-      <ul id="sessList"></ul>
-      <p class="hint" id="pickHint">工房がせまいので、いちどに5ひきまでだよ</p>
+    <div class="sheet cfg">
+      <h2>せってい<button type="button" id="sheetClose" aria-label="とじる">×</button></h2>
+      <div class="cfgBody">
+        <div class="sec">いちどに 出す スライムの数</div>
+        <div class="val" id="maxVal"></div>
+        <input type="range" id="maxRange" min="1" max="8" step="1">
+
+        <div class="sec">だれを 工房に よぶ？</div>
+        <label class="auto"><input type="checkbox" id="autoMode">
+          <span id="autoLabel">おまかせ</span></label>
+        <ul id="sessList"></ul>
+        <p class="hint" id="pickHint"></p>
+
+        <div class="sec">うしろの 色</div>
+        <div class="swatch" id="bgRow"></div>
+
+        <div class="sec">時間で 部屋の あかるさを 変える</div>
+        <p class="note">朝は 金いろ、夕方は だいだい、夜は 青く 暗くなります</p>
+        <button class="tog" id="dlBtn" type="button"></button>
+
+        <div class="sec">やり残しの おしらせ</div>
+        <p class="note">あなたでないと できないことを 部屋の外に 出します</p>
+        <button class="tog" id="tdBtn" type="button"></button>
+
+        <div class="sec">いつもいる子（ぬし）の 名まえ</div>
+        <p class="note">名札には 出しません。かけあいの中で 呼ぶときに 使います</p>
+        <input class="nmbox" type="text" id="nuName" maxlength="8">
+
+        <div class="sec">ぬしの おおきさ</div>
+        <div class="val" id="nuSizeVal"></div>
+        <input type="range" id="nuSize" min="45" max="115" step="1">
+
+        <div class="sec">いつもいる子（ぬし）の 色</div>
+        <div class="val" id="nuHueVal"></div>
+        <div class="swatch" id="hueRow"></div>
+
+        <div class="sec">ぬしの かぶりもの</div>
+        <div class="val" id="nuHatVal"></div>
+        <div class="swatch" id="hatRow"></div>
+
+        <div class="sec">おしゃべりの ひんど</div>
+        <div class="val" id="chatVal"></div>
+        <input type="range" id="chatRange" min="0" max="4" step="1">
+
+        <div class="sec">ぶつかった時の よけかた</div>
+        <p class="note">はやいほど すぐに よけます。ゆっくりだと しばらく 押してから 向きを変えます</p>
+        <div class="val" id="dodgeVal"></div>
+        <input type="range" id="dodgeRange" min="0" max="4" step="1">
+
+        <div class="sec win">まどの おおきさ</div>
+        <p class="note win">右下の すみを ひっぱっても 変えられます</p>
+        <div class="swatch win" id="winRow"></div>
+      </div>
     </div>
   </div>
 
@@ -257,7 +336,8 @@
     id: "slime",
     name: "スライム",
     // 色は「もとの緑からどれだけ色相をずらすか」で表す
-    hues: [0, 0.11, 0.22, 0.32, 0.42, 0.55, 0.69, 0.80],
+    // アプリ版と おなじ 10色（名まえは HUE_NAMES）
+    hues: [0, 0.10, 0.20, 0.29, 0.38, 0.47, 0.56, 0.66, 0.77, 0.88],
     baseHue: 0.42,                         // もとの絵（緑）の色相
     sheet: "sheet_green.png",              // 起きている絵（これ1枚）
     sleepSheet: "sheet_sleep.png",         // 寝ている絵（1行目の緑だけ使う）
@@ -304,6 +384,227 @@
   const hueSwatch = (i)=> { const c = hsl(hueOf(i), 0.62, 0.45); return `rgb(${c[0]},${c[1]},${c[2]})`; };
   const hueTint   = (i)=> hsl(hueOf(i), 0.72, 0.93);   // 吹き出しの下じき
   const hueInk    = (i)=> hsl(hueOf(i), 0.60, 0.30);   // 吹き出しの文字
+
+  // ───────────────────────────────────────────
+  // せってい
+  //   かべがみアプリと 同じ ことば・同じ ならびに そろえてある。
+  //   どちらで 見ても 同じ名前で 同じものを さわれるように
+  // ───────────────────────────────────────────
+  const CFG_STORE = "slimekoubou.cfg.v1";
+  const HUE_NAMES = ["みどり","みずいろ","あお","あおむらさき","むらさき",
+                     "ももいろ","あか","だいだい","きみどり","わかくさ"];
+  const HAT_NAMES = ["なし","おうかん","とんがりぼうし","リボン","おはな"];
+  const CHAT_NAMES = ["しない","ときどき","ふつう","よく しゃべる","とても おしゃべり"];
+  const DODGE_NAMES = ["とても ゆっくり","ゆっくり","ふつう","はやい","とても はやい"];
+  const BG_COLORS = ["#E7DCC8","#F7F5F0","#DFE4E8","#DCE9F2",
+                     "#E9E2F2","#3A4450","#20262E","#0E1013"];
+  const CFG_DEF = { bg:0, daylight:true, showTodo:true, nushiName:"トバ",
+                    nushiSize:68, nushiHue:0, nushiHat:1, chat:2, dodge:2 };
+  const cfg = Object.assign({}, CFG_DEF);
+  try{ Object.assign(cfg, JSON.parse(localStorage.getItem(CFG_STORE) || "{}")); }catch(e){}
+  function saveCfg(){
+    try{ localStorage.setItem(CFG_STORE, JSON.stringify(cfg)); }catch(e){}
+  }
+
+  // ── かぶりもの ──
+  // 絵は 用意していないので その場で 描く。アプリ版の Hats.kt と 同じ形
+  const HAT_BASE_W = 200;                      // 描く時の はば（あとで 縮めて のせる）
+  const HAT_SINK = [0, 0.44, 0.26, 0.34, 0.46]; // どれだけ ふかく かぶせるか
+  const HAT_TILT = -11;                        // まっすぐより すこし かたむける
+
+  function hatCanvas(kind, w){
+    const cv = document.createElement("canvas");
+    cv.width = Math.round(w*1.9); cv.height = Math.round(w*1.7);
+    const c = cv.getContext("2d");
+    const cx = cv.width/2, y0 = cv.height - w*0.14;
+    const P = {
+      grad(x, y1, y2, top, bot){
+        const g = c.createLinearGradient(x, y1, x, y2);
+        g.addColorStop(0, top); g.addColorStop(1, bot); c.fillStyle = g;
+      },
+      fill(col){ c.fillStyle = col; },
+      line(col, wid){ c.strokeStyle = col; c.lineWidth = wid; },
+      // 中心と はば・たかさ で だ円をひく（Android の drawOval と 同じ数え方）
+      oval(x1, y1, x2, y2){
+        c.beginPath();
+        c.ellipse((x1+x2)/2, (y1+y2)/2, (x2-x1)/2, (y2-y1)/2, 0, 0, Math.PI*2);
+      },
+      circ(x, y, r){ c.beginPath(); c.arc(x, y, r, 0, Math.PI*2); },
+      round(x1, y1, x2, y2, r){
+        c.beginPath();
+        if(c.roundRect) c.roundRect(x1, y1, x2-x1, y2-y1, r);
+        else c.rect(x1, y1, x2-x1, y2-y1);
+      },
+    };
+    if(kind === 1) crown(c, P, cx, y0, w);
+    else if(kind === 2) wizardHat(c, P, cx, y0, w);
+    else if(kind === 3) ribbon(c, P, cx, y0, w);
+    else if(kind === 4) flower(c, P, cx, y0, w);
+    return cv;
+  }
+
+  function crown(c, P, cx, y0, w){
+    const h = w*0.66, gold1 = "#FFE6A0", gold2 = "#C9891C", edge = "#7A5210";
+    c.beginPath();
+    c.moveTo(cx - w*0.46, y0);
+    c.lineTo(cx - w*0.46, y0 - h*0.74);
+    c.lineTo(cx - w*0.19, y0 - h*0.30);
+    c.lineTo(cx, y0 - h*1.06);
+    c.lineTo(cx + w*0.19, y0 - h*0.30);
+    c.lineTo(cx + w*0.46, y0 - h*0.74);
+    c.lineTo(cx + w*0.46, y0);
+    c.closePath();
+    P.grad(cx, y0 - h*1.06, y0, gold1, gold2); c.fill();
+    P.line(edge, w*0.035); c.stroke();
+    P.fill("rgba(255,255,255,.40)");
+    c.fillRect(cx - w*0.40, y0 - h*0.62, w*0.08, h*0.50);
+    P.round(cx - w*0.50, y0 - h*0.24, cx + w*0.50, y0 + h*0.04, w*0.06);
+    P.fill("#FBF6EC"); c.fill();
+    P.line(edge, w*0.028); c.stroke();
+    P.fill("#DCD3C0");
+    for(let i = -1; i <= 1; i++){ P.circ(cx + i*w*0.24, y0 - h*0.10, w*0.026); c.fill(); }
+    [-0.46, 0, 0.46].forEach(dx=>{
+      const px = cx + dx*w, py = (dx === 0) ? y0 - h*1.06 : y0 - h*0.74;
+      P.fill(gold1); P.circ(px, py, w*0.058); c.fill();
+      P.line(edge, w*0.024); c.stroke();
+      P.fill("rgba(255,255,255,.80)"); P.circ(px - w*0.018, py - w*0.018, w*0.018); c.fill();
+    });
+    P.fill("#D8394F"); P.circ(cx, y0 - h*0.46, w*0.082); c.fill();
+    P.line("#8E1E30", w*0.022); c.stroke();
+    P.fill("rgba(255,255,255,.90)"); P.circ(cx - w*0.026, y0 - h*0.50, w*0.024); c.fill();
+    P.fill("#3E6FD0");
+    P.circ(cx - w*0.28, y0 - h*0.46, w*0.052); c.fill();
+    P.circ(cx + w*0.28, y0 - h*0.46, w*0.052); c.fill();
+    P.line("#23407C", w*0.02);
+    P.circ(cx - w*0.28, y0 - h*0.46, w*0.052); c.stroke();
+    P.circ(cx + w*0.28, y0 - h*0.46, w*0.052); c.stroke();
+  }
+
+  function wizardHat(c, P, cx, y0, w){
+    const h = w*0.62, edge = "#2E1F52";
+    P.grad(cx, y0 - h*0.20, y0 + h*0.26, "#7B5CC4", "#422C7C");
+    P.oval(cx - w*0.62, y0 - h*0.18, cx + w*0.56, y0 + h*0.26); c.fill();
+    P.line(edge, w*0.032); c.stroke();
+    c.beginPath();
+    c.moveTo(cx - w*0.38, y0 - h*0.02);
+    c.quadraticCurveTo(cx - w*0.14, y0 - h*1.10, cx + w*0.30, y0 - h*1.72);
+    c.quadraticCurveTo(cx + w*0.16, y0 - h*0.86, cx + w*0.34, y0 - h*0.02);
+    c.closePath();
+    P.grad(cx, y0 - h*1.72, y0, "#9878DE", "#503392"); c.fill();
+    P.line(edge, w*0.032); c.stroke();
+    P.round(cx - w*0.38, y0 - h*0.42, cx + w*0.35, y0 - h*0.12, w*0.04);
+    P.fill("#3A2670"); c.fill();
+    P.round(cx - w*0.09, y0 - h*0.40, cx + w*0.09, y0 - h*0.14, w*0.03);
+    P.fill("#EFD06A"); c.fill();
+    P.line("#A8801F", w*0.022); c.stroke();
+    P.fill("#3A2670");
+    c.fillRect(cx - w*0.035, y0 - h*0.34, w*0.07, h*0.14);
+    star(c, P, cx + w*0.02, y0 - h*0.88, w*0.115, "#F6DC7E", "#B9932F", w*0.022);
+  }
+
+  function star(c, P, cx, cy, r, fill, edge, lw){
+    c.beginPath();
+    for(let i = 0; i < 10; i++){
+      const rr = (i % 2 === 0) ? r : r*0.45;
+      const a = (-90 + i*36) * Math.PI/180;
+      const px = cx + Math.cos(a)*rr, py = cy + Math.sin(a)*rr;
+      if(i === 0) c.moveTo(px, py); else c.lineTo(px, py);
+    }
+    c.closePath();
+    P.fill(fill); c.fill();
+    P.line(edge, lw); c.stroke();
+  }
+
+  function ribbon(c, P, cx, y0, w){
+    const h = w*0.60, edge = "#A83060", ky = y0 - h*0.36;
+    P.fill("#D8567F");
+    c.beginPath();
+    c.moveTo(cx - w*0.06, ky); c.lineTo(cx - w*0.22, y0 + h*0.22);
+    c.lineTo(cx - w*0.02, y0 + h*0.06); c.closePath();
+    c.moveTo(cx + w*0.06, ky); c.lineTo(cx + w*0.22, y0 + h*0.22);
+    c.lineTo(cx + w*0.02, y0 + h*0.06); c.closePath();
+    c.fill(); P.line(edge, w*0.026); c.stroke();
+    P.grad(cx, ky - h*0.62, ky + h*0.40, "#FFA8C2", "#E0567F");
+    c.beginPath();
+    c.moveTo(cx, ky);
+    c.quadraticCurveTo(cx - w*0.62, ky - h*0.78, cx - w*0.50, ky + h*0.06);
+    c.quadraticCurveTo(cx - w*0.44, ky + h*0.52, cx, ky + h*0.10);
+    c.closePath();
+    c.moveTo(cx, ky);
+    c.quadraticCurveTo(cx + w*0.62, ky - h*0.78, cx + w*0.50, ky + h*0.06);
+    c.quadraticCurveTo(cx + w*0.44, ky + h*0.52, cx, ky + h*0.10);
+    c.closePath();
+    c.fill(); P.line(edge, w*0.032); c.stroke();
+    P.line("rgba(168,48,96,.33)", w*0.024);
+    c.beginPath();
+    c.moveTo(cx - w*0.06, ky + h*0.02); c.lineTo(cx - w*0.30, ky + h*0.16);
+    c.moveTo(cx + w*0.06, ky + h*0.02); c.lineTo(cx + w*0.30, ky + h*0.16);
+    c.stroke();
+    P.grad(cx, ky - h*0.22, ky + h*0.22, "#FF9BBA", "#D24C76");
+    P.round(cx - w*0.11, ky - h*0.20, cx + w*0.11, ky + h*0.22, w*0.05);
+    c.fill(); P.line(edge, w*0.03); c.stroke();
+    P.fill("rgba(255,255,255,.53)");
+    P.round(cx - w*0.07, ky - h*0.14, cx - w*0.035, ky + h*0.10, w*0.02); c.fill();
+  }
+
+  function flower(c, P, cx, y0, w){
+    const cy = y0 - w*0.36;
+    P.fill("#5FA349");                       // くき
+    P.round(cx - w*0.045, cy, cx + w*0.045, y0 + w*0.10, w*0.045); c.fill();
+    P.fill("#7FBF63");                       // は
+    c.save();
+    c.translate(cx - w*0.30, cy + w*0.26); c.rotate(38*Math.PI/180);
+    c.translate(-(cx - w*0.30), -(cy + w*0.26));
+    P.oval(cx - w*0.46, cy + w*0.18, cx - w*0.14, cy + w*0.35); c.fill();
+    c.restore();
+    for(let i = 0; i < 5; i++){
+      c.save();
+      c.translate(cx, cy); c.rotate((-90 + i*72)*Math.PI/180); c.translate(-cx, -cy);
+      P.grad(cx, cy - w*0.56, cy, "#FFFFFF", "#F2E6CE");
+      P.oval(cx - w*0.155, cy - w*0.54, cx + w*0.155, cy - w*0.06); c.fill();
+      P.line("#DDD0B6", w*0.024); c.stroke();
+      c.restore();
+    }
+    P.grad(cx, cy - w*0.16, cy + w*0.16, "#FFDC72", "#E0A518");
+    P.circ(cx, cy, w*0.155); c.fill();
+    P.line("#B07E12", w*0.026); c.stroke();
+    P.fill("#B07E12");
+    for(let i = 0; i < 5; i++){
+      const a = i*72*Math.PI/180;
+      P.circ(cx + Math.cos(a)*w*0.062, cy + Math.sin(a)*w*0.062, w*0.022); c.fill();
+    }
+  }
+
+  for(let i = 1; i <= 4; i++){
+    loadSprite("hat" + i, hatCanvas(i, HAT_BASE_W).toDataURL());
+  }
+
+  // ── 時間で 部屋の あかるさを 変える ──
+  // アプリ版と 同じ 目もり。時刻のあいだは なめらかに つなぐ
+  const DAY_KEY = [
+    //  時刻,  あか, みどり,  あお, 明るさ
+    [ 3, 0.70, 0.74, 1.00, 0.54],
+    [ 6, 0.95, 0.90, 0.92, 0.76],
+    [ 9, 1.04, 1.00, 0.96, 1.00],
+    [15, 1.00, 1.00, 1.00, 1.00],
+    [18, 1.12, 0.93, 0.78, 0.94],
+    [20, 0.88, 0.86, 1.00, 0.74],
+    [23, 0.73, 0.76, 1.00, 0.58],
+  ];
+  function dayLook(hf){
+    for(let i = 0; i < DAY_KEY.length; i++){
+      const a = DAY_KEY[i], b = DAY_KEY[(i+1) % DAY_KEY.length];
+      const h0 = a[0]; let h1 = b[0];
+      if(h1 <= h0) h1 += 24;
+      let h = hf;
+      if(h < h0) h += 24;
+      if(h >= h0 && h <= h1){
+        const t = (h1 - h0 < 1e-3) ? 0 : (h - h0)/(h1 - h0);
+        return [1,2,3,4].map(j => a[j] + (b[j] - a[j])*t);
+      }
+    }
+    return [1,1,1,1];
+  }
 
   // 手描きの吹き出し。四隅としっぽを潰さずに横へ伸ばすため 9分割で読む
   loadSprite("bubble", "bubble.png", { slice9:{ left:46, right:46, top:33, bottom:44 } });
@@ -551,12 +852,26 @@
   }
 
   // 背景
-  const bg = add([ sprite("room"), pos(0,0), z(-100) ]);
+  const bg = add([ sprite("room"), pos(0,0), color(255,255,255), z(-100) ]);
   // テーブルは 部屋の絵にも写っているが、もういちど 同じ場所に重ねる。
   // z を「テーブルが床にふれている手前のふち」にすると、
   // 奥にいる子は下に、手前にいる子は上に来て、前後がちゃんと出る
-  add([ sprite("table"), pos(TABLE_IMG.x, TABLE_IMG.y), z(TABLE_IMG.front) ]);
+  const tableImg = add([ sprite("table"), pos(TABLE_IMG.x, TABLE_IMG.y),
+    color(255,255,255), z(TABLE_IMG.front) ]);
   bg.onUpdate(()=>{ bg.width=RW; bg.height=RH; });
+
+  // 時間で 部屋の あかるさを 変える。1分ごとに 作りなおせば じゅうぶん
+  function applyDaylight(){
+    if(!cfg.daylight){ bg.color = rgb(255,255,255); tableImg.color = rgb(255,255,255); return; }
+    const d = new Date();
+    const v = dayLook(d.getHours() + d.getMinutes()/60);
+    const c = rgb(Math.min(255, v[0]*v[3]*255),
+                  Math.min(255, v[1]*v[3]*255),
+                  Math.min(255, v[2]*v[3]*255));
+    bg.color = c; tableImg.color = c;
+  }
+  applyDaylight();
+  setInterval(applyDaylight, 60000);
 
   // ───────────────────────────────────────────
   // スライム1匹ぶんの体をつくる
@@ -578,6 +893,8 @@
       pos(gp), anchor("bot"), scale(SC), z(gp.y),
       {
         gp: gp.clone(), target: floorPoint(), rest: 0,
+        k: 1,            // 大きさの倍率（ぬしだけ 設定で 変えられる）
+        hop: 0,          // いま どれだけ 跳ねているか（かぶりものが 使う）
         t: rand(0,10), dying: false, mode: "idle",
         shadow, bub:null, back:null, say:0, talkIn: rand(4,14),
         bubLift: 0,      // 吹き出しの高さをずらす量（重なり防止）
@@ -718,19 +1035,22 @@
     }
 
     const sleeping = (s.mode === "sleep");
-    s.pos = vec2(s.gp.x, s.gp.y - hop + (sleeping ? FOOT_SLEEP : FOOT));
-    const sc = sleeping ? SC_SLEEP : SC;
+    // ぬしだけ 大きさを えらべる。体も 影も 頭の高さも おなじ倍率で
+    const k = s.k || 1;
+    s.hop = hop;
+    s.pos = vec2(s.gp.x, s.gp.y - hop + (sleeping ? FOOT_SLEEP : FOOT)*k);
+    const sc = (sleeping ? SC_SLEEP : SC) * k;
     s.scale = vec2(sc*sx, sc*sy);   // 反転しない（左右は絵で分かれている）
     s.z = s.gp.y;
 
     // 影は床にはりついたまま。跳ぶほど小さく薄く
     const lift = 1 - Math.min(1, hop/(HOP+3))*0.34;
     s.shadow.pos = s.gp;
-    s.shadow.scale = vec2(SHX*lift, SHY*lift);
+    s.shadow.scale = vec2(SHX*lift*k, SHY*lift*k);
     s.shadow.opacity = 0.28*lift;
     s.shadow.z = s.gp.y - 1;
 
-    const head = headOf(s);
+    const head = headOf(s) * (s.k || 1);
     // 部屋の 奥半分にいる子は 上が壁で空いている。手前の子は 下が空いている。
     // 空いている側に ことばを出すと、ほかの子と重なりにくい
     const upper = (s.gp.y < FLOOR.cy);
@@ -950,7 +1270,8 @@
         walkAnim(s, moved.len() > 1e-3 ? moved : d);
         if(hit || np.dist(s.gp) < v.len()*0.4){
           s.stuck = (s.stuck || 0) + dt();
-          if(s.stuck > 0.5){
+          // どれだけ 押してから 向きを変えるか。設定で えらべる
+          if(s.stuck > ([1.4, 0.9, 0.5, 0.28, 0.12][cfg.dodge] || 0.5)){
             s.stuck = 0;
             if(!s.inChat && !s.waitSpot && !s.standbySpot) s.target = floorPoint(s);
           }
@@ -1081,12 +1402,49 @@
   // 工房のぬし ─ この子は消えない。名札は持たない
   //   だれも働いていない時は、すみっこで寝て待っている
   // ───────────────────────────────────────────
-  const NUSHI_HUE = 0;                 // ぬしは もとの色（緑）
-  const nushi = makeSlime(NUSHI_HUE, BED.clone());
+  const nushi = makeSlime(cfg.nushiHue, BED.clone());
   nushi.isNushi = true;
-  applyTint(nushi);
-  setTag(nushi, "トバ");
   nushi.bed = BED.clone();
+
+  // かぶりもの。ぬしの 頭のてっぺんに のせて、いっしょに 跳ねる
+  const hatObj = add([ sprite("hat1"), pos(0,0), anchor("bot"),
+    scale(1), rotate(HAT_TILT), opacity(0), z(0) ]);
+  hatObj.hatKind = 0;
+
+  // 設定を ぬしに うつす。色・大きさ・名札の 有無を まとめて
+  function applyNushi(){
+    const i = Math.max(0, Math.min(PACK.hues.length - 1, cfg.nushiHue | 0));
+    cfg.nushiHue = i;
+    nushi.hueIdx = i;
+    nushi.uniform.u_hue = PACK.hues[i];
+    nushi.k = Math.max(0.45, Math.min(1.15, (cfg.nushiSize | 0) / 100));
+    applyTint(nushi);
+    setTag(nushi, "");        // 名札は 出さない（アプリ版と おなじ）
+  }
+  applyNushi();
+
+  onUpdate(()=>{
+    const kind = Math.max(0, Math.min(4, cfg.nushiHat | 0));
+    if(kind === 0 || nushi.dying){ hatObj.opacity = 0; return; }
+    if(hatObj.hatKind !== kind){
+      hatObj.hatKind = kind;
+      hatObj.unuse("sprite");
+      hatObj.use(sprite("hat" + kind));
+    }
+    hatObj.opacity = 1;
+    const k = nushi.k || 1;
+    const w = 78 * k;                       // 部屋の中での かぶりものの はば
+    const sc = w / HAT_BASE_W;
+    hatObj.scale = vec2(sc, sc);
+    // 頭のてっぺん。ぺたんこの時と のびている時で だいぶ ちがう
+    const n = PACK.grid.x;
+    const col = (((nushi.frame | 0) % n) + n) % n;
+    const hTop = (nushi.mode === "sleep" ? 240 * SC_SLEEP
+                                         : (PACK.headByCol[col] || PACK.head) * SC) * k;
+    hatObj.pos = vec2(nushi.gp.x,
+      nushi.gp.y - hTop - nushi.hop + HAT_SINK[kind] * w);
+    hatObj.z = nushi.gp.y + 0.5;
+  });
   nushi.mode = "idle";
   nushi.target = floorPoint(nushi);
   giveLife(nushi);
@@ -1109,9 +1467,15 @@
   // トバが まざる時は 本人の口ぶりで。
   // さきに話すのは いつも a なので、トバが b の時は
   // 住人の 呼びかけを ひとつ 前に足して 順ばんを そろえる
+  // 台本の中の「トバ」を、いまの 名まえに 置きかえる
+  function named(lines){
+    const n = (cfg.nushiName || "").trim();
+    if(!n || n === "トバ") return lines;
+    return lines.map(t => t.split("トバ").join(n));
+  }
   function pickDialogFor(a, b){
-    if(a.isNushi) return pick(TOBA_TALKS);
-    if(b.isNushi) return [pick(TOBA_CALL)].concat(pick(TOBA_TALKS));
+    if(a.isNushi) return named(pick(TOBA_TALKS));
+    if(b.isNushi) return named([pick(TOBA_CALL)].concat(pick(TOBA_TALKS)));
     return pickDialog();
   }
 
@@ -1139,9 +1503,11 @@
     if(!chat) return;
     [chat.a, chat.b].forEach(s=>{ s.inChat = false; s.face = null; s.talkIn = rand(10, 20); });
     chat = null;
-    chatCool = 4;
+    // つぎの かけあいまで 待つ 回数（見にいくのは 2.5秒ごと）
+    chatCool = [1e9, 14, 4, 2, 1][cfg.chat] || 4;
   }
   function tryStartChat(){
+    if(cfg.chat === 0) return;          // しない
     if(chat || chatCool > 0) return;
     const free = everyone().filter(chatReady);
     for(let i = 0; i < free.length; i++){
@@ -1238,6 +1604,7 @@
     const box = document.getElementById("todoBox");
     if(!box) return;
     box.innerHTML = "";
+    if(!cfg.showTodo) return;
     if(!items || !items.length) return;
     items.forEach(t=>{
       const row = document.createElement("div"); row.className = "row";
@@ -1404,7 +1771,6 @@
   const sessList  = document.getElementById("sessList");
   const autoMode  = document.getElementById("autoMode");
   const autoLabel = document.getElementById("autoLabel");
-  const maxBtns   = document.getElementById("maxBtns");
   const pickHint  = document.getElementById("pickHint");
   const hiddenNote= document.getElementById("hiddenNote");
 
@@ -1413,6 +1779,9 @@
   });
   document.getElementById("sheetClose").addEventListener("click", ()=> sheetWrap.classList.remove("open"));
   sheetWrap.addEventListener("click", (e)=>{ if(e.target === sheetWrap) sheetWrap.classList.remove("open"); });
+  // ウィジェット姿では 窓の どこを つかんでも 窓が動いてしまうので、
+  // 設定の中だけは つかんでも 動かないようにする
+  sheetWrap.addEventListener("mousedown", (e)=> e.stopPropagation(), true);
   autoMode.addEventListener("change", ()=>{
     view.mode = autoMode.checked ? "auto" : "pick";
     saveView(); renderPicker(); poll();
@@ -1429,27 +1798,116 @@
     saveView(); renderPicker(); poll();
   }
 
-  function renderMaxButtons(){
-    maxBtns.innerHTML = "";
-    MAX_CHOICES.forEach(n=>{
+  // ── せっての 部品 ──
+  // つまみ・入れもの・えらぶ札。どれも 変えた その場で 部屋に うつす
+  function slider(id, valId, get, set, name){
+    const sl = document.getElementById(id), lab = document.getElementById(valId);
+    function show(){ lab.textContent = name(get()); }
+    sl.value = get(); show();
+    sl.addEventListener("input", ()=>{ set(+sl.value); show(); saveCfg(); });
+    return show;
+  }
+  function toggle(id, get, set, onTxt, offTxt){
+    const b = document.getElementById(id);
+    function show(){ b.textContent = get() ? onTxt : offTxt; b.classList.toggle("on", !!get()); }
+    show();
+    b.addEventListener("click", ()=>{ set(!get()); show(); saveCfg(); });
+    return show;
+  }
+  function swatches(id, n, paint, get, set){
+    const row = document.getElementById(id), cells = [];
+    function show(){ cells.forEach((c,i)=> c.classList.toggle("on", i === get())); }
+    for(let i = 0; i < n; i++){
       const b = document.createElement("button");
-      b.type = "button"; b.textContent = n;
-      if(n === view.max) b.className = "on";
-      b.addEventListener("click", ()=>{
-        view.max = n;
-        // 指名が上限より多ければ、古いものから外す
-        while(view.picked.length > view.max) view.picked.shift();
-        saveView(); renderPicker(); poll();
-      });
-      maxBtns.appendChild(b);
-    });
+      b.type = "button";
+      paint(b, i);
+      b.addEventListener("click", ()=>{ set(i); show(); saveCfg(); });
+      cells.push(b); row.appendChild(b);
+    }
+    show();
+    return show;
+  }
+
+  function renderMax(){
+    document.getElementById("maxVal").textContent = view.max + " ひき";
+    document.getElementById("maxRange").value = view.max;
     autoLabel.textContent = `おまかせ（うごいたばかりの${view.max}つ）`;
     pickHint.textContent = `いちどに ${view.max}ひき までだよ`;
   }
+  document.getElementById("maxRange").addEventListener("input", (e)=>{
+    view.max = +e.target.value;
+    while(view.picked.length > view.max) view.picked.shift();   // 古い指名から外す
+    saveView(); renderPicker(); poll();
+  });
+
+  // うしろの 色
+  swatches("bgRow", BG_COLORS.length,
+    (b,i)=>{ b.style.background = BG_COLORS[i]; b.title = BG_COLORS[i]; },
+    ()=> cfg.bg, (v)=>{ cfg.bg = v; applyBg(); });
+  function applyBg(){
+    // ウィジェット姿は うしろが すけているのが 取りえなので、色は 塗らない
+    if(/[?&]widget/.test(location.search)) return;
+    const c = BG_COLORS[Math.max(0, Math.min(BG_COLORS.length-1, cfg.bg|0))];
+    document.body.style.background = c;
+  }
+  applyBg();
+
+  // 時間で あかるさ / やり残しの おしらせ
+  toggle("dlBtn", ()=> cfg.daylight, (v)=>{ cfg.daylight = v; applyDaylight(); },
+    "変える", "変えない");
+  toggle("tdBtn", ()=> cfg.showTodo, (v)=>{ cfg.showTodo = v; renderTodo(lastRaw ? lastRaw.todo : null); },
+    "出す", "出さない");
+
+  // ぬしの 名まえ
+  const nuName = document.getElementById("nuName");
+  nuName.value = cfg.nushiName || "";
+  nuName.addEventListener("input", ()=>{ cfg.nushiName = nuName.value; saveCfg(); });
+
+  // ぬしの おおきさ・色・かぶりもの
+  slider("nuSize", "nuSizeVal", ()=> cfg.nushiSize,
+    (v)=>{ cfg.nushiSize = v; applyNushi(); }, (v)=> "住人の " + v + " %");
+  slider("chatRange", "chatVal", ()=> cfg.chat,
+    (v)=>{ cfg.chat = v; }, (v)=> CHAT_NAMES[v]);
+  slider("dodgeRange", "dodgeVal", ()=> cfg.dodge,
+    (v)=>{ cfg.dodge = v; }, (v)=> DODGE_NAMES[v]);
+
+  const showHue = swatches("hueRow", HUE_NAMES.length,
+    (b,i)=>{ b.style.background = hueSwatch(i); b.title = HUE_NAMES[i]; },
+    ()=> cfg.nushiHue,
+    (v)=>{ cfg.nushiHue = v; applyNushi();
+           document.getElementById("nuHueVal").textContent = HUE_NAMES[v]; });
+  document.getElementById("nuHueVal").textContent = HUE_NAMES[cfg.nushiHue] || "";
+
+  swatches("hatRow", HAT_NAMES.length,
+    (b,i)=>{
+      b.title = HAT_NAMES[i];
+      if(i === 0){ const t = document.createElement("span");
+        t.className = "none"; t.textContent = "なし"; b.appendChild(t); return; }
+      const im = document.createElement("img");
+      im.src = hatCanvas(i, 64).toDataURL(); im.alt = HAT_NAMES[i];
+      b.appendChild(im);
+    },
+    ()=> cfg.nushiHat,
+    (v)=>{ cfg.nushiHat = v;
+           document.getElementById("nuHatVal").textContent = HAT_NAMES[v]; });
+  document.getElementById("nuHatVal").textContent = HAT_NAMES[cfg.nushiHat] || "";
+
+  // まどの おおきさ（ウィジェット姿の時だけ）
+  const WIN_SIZES = [["小",520],["中",700],["大",940],["特大",1240]];
+  (function(){
+    const row = document.getElementById("winRow");
+    WIN_SIZES.forEach(([nm, w])=>{
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = nm;
+      b.style.cssText = "width:auto;padding:0 16px;height:44px;font:inherit;font-size:14px;color:#4a5560";
+      b.addEventListener("click", ()=> setWinSize(w, Math.round(w*887/1774)));
+      row.appendChild(b);
+    });
+  })();
 
   function renderPicker(){
     autoMode.checked = (view.mode === "auto");
-    renderMaxButtons();
+    renderMax();
     sessList.innerHTML = "";
     const live = lastList.filter(x => !x.leaving);
     if(!live.length){
@@ -1568,6 +2026,53 @@
       try{ window.pywebview.api.quit(); }catch(e){ window.close(); }
     });
   }
+
+  // ── まどの 大きさ ──
+  // 枠を 消した窓には ふちが無く、OSに 大きさを 変えてもらえない。
+  // 右下の すみを 自分で 用意して、ひっぱったぶんを 窓に つたえる
+  function setWinSize(w, h){
+    if(!window.pywebview) return;
+    try{ window.pywebview.api.resize(Math.round(w), Math.round(h)); }catch(e){}
+  }
+  (function(){
+    const grip = document.getElementById("wgrip");
+    if(!grip) return;
+    grip.addEventListener("pointerdown", (e)=>{
+      if(!window.pywebview) return;
+      // ここで 止めないと「どこでも つかんで動かせる」ほうが 先に効いて、
+      // 大きさを 変えるつもりが 窓ごと 動いてしまう
+      e.preventDefault(); e.stopPropagation();
+      // 窓を 大きくしていく あいだ、指は 窓の外に はみ出す。
+      // つかみっぱなしに しておかないと、外に出たとたん 動きが 届かなくなる
+      try{ grip.setPointerCapture(e.pointerId); }catch(err){}
+      window.pywebview.api.size().then(s0=>{
+        const x0 = e.screenX, y0 = e.screenY;
+        // 窓の「大きさ」の数えかたと、この画面の 1ますは 同じとは かぎらない
+        // （画面の 拡大率しだい）。いまの 窓の はばで 比べて そろえる
+        const unit = (window.innerWidth > 0) ? (s0.w / window.innerWidth) : 1;
+        let want = null, waiting = false;
+        function move(ev){
+          ev.preventDefault();
+          want = [s0.w + (ev.screenX - x0)*unit, s0.h + (ev.screenY - y0)*unit];
+          if(waiting) return;
+          waiting = true;
+          requestAnimationFrame(()=>{
+            waiting = false;
+            if(want) setWinSize(want[0], want[1]);
+          });
+        }
+        function up(){
+          grip.removeEventListener("pointermove", move);
+          grip.removeEventListener("pointerup", up);
+          grip.removeEventListener("pointercancel", up);
+          if(want) setWinSize(want[0], want[1]);   // 最後の ひとふり を とりこぼさない
+        }
+        grip.addEventListener("pointermove", move);
+        grip.addEventListener("pointerup", up);
+        grip.addEventListener("pointercancel", up);
+      });
+    }, true);
+  })();
 
   // ── ホーム画面アプリの係を登録する ──
   // 「安全なつながり」でないと使えない決まりなので、使える時だけ静かに登録する。

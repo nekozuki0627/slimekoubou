@@ -384,7 +384,9 @@ def snapshot():
     return {"sessions": out, "total": len(out), "rev": page_rev(),
             "soon": next_task(),
             "todo": [{"id": t.get("id"), "title": t.get("title", ""),
-                      "session": t.get("session", ""), "why": t.get("why", ""),
+                      "session": t.get("session", ""),
+                      "tag": first_word(t.get("session", "")),
+                      "why": t.get("why", ""),
                       "url": t.get("url", "")} for t in todo]}
 
 

@@ -1247,10 +1247,16 @@
       btn.onclick = ()=>{
         fetch("/api/todo/done?id=" + encodeURIComponent(t.id)).then(()=> poll());
       };
+      // どの スライムの しごとか、色の丸で 結びつける
+      const sl = t.tag ? Array.from(bySession.values()).find(x => x.tagTxt
+                    && x.tagTxt.text === t.tag) : null;
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      dot.style.background = sl ? hueSwatch(sl.hueIdx) : "#c9c2d4";
       const nm = document.createElement("span");
       nm.className = "nm"; nm.textContent = t.title || "";
       if(t.why) nm.title = t.why;
-      row.append(btn, nm);
+      row.append(btn, dot, nm);
       if(t.session){
         const st = document.createElement("span");
         st.className = "st"; st.textContent = t.session;

@@ -4,3 +4,4 @@ _access.log
 *.apk
 _state.json
 _kinds.log
+_config.json

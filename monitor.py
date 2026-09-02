@@ -765,49 +765,91 @@ def next_task():
     return _TASKS
 
 
-# ── ゆま本人でないと できない しごと ──
-# 各セッションの トバが、ここに 1件 1ファイルで 書きおく。
-# 追記＝新しいファイルを作る／おわり＝そのファイルを消す。
-# こうすると 何本のセッションが 同時に 書いても こわれない
-TODO_DIR = os.path.join(os.path.expanduser("~"), ".claude", "yuma_todo")
+# ── 本人でないと できない しごと ──
+# 台帳（markdown）の 中から、印の ついた 行だけを ひろって 部屋に出す。
+# 置き場を 2つに 分けると かならず ズレるので、台帳は 1つだけ にする。
+#
+#   - [ ] Driveのゴミ箱を空にする @me #ボイストランド
+#     └ チェックが 空いている ＋ 印(@me) が ある行だけ 出す
+#     └ #うしろ は どの しごとの ものか（なくてもよい）
+#
+# 台帳の場所と 印は _config.json で 変えられる。
+# 人によって 台帳の 置き場は ちがうので、決めうちに しない
+TODO_FILE = os.path.join(HERE, "todo.md")
+TODO_MARK = "@me"
+
+try:
+    with open(os.path.join(HERE, "_config.json"), "r", encoding="utf-8") as _f:
+        _cfg = json.load(_f)
+    TODO_FILE = os.path.expanduser(_cfg.get("todo_file") or TODO_FILE)
+    TODO_MARK = _cfg.get("todo_mark") or TODO_MARK
+except Exception:
+    pass
+
+_TODO_LINE = re.compile(r"^\s*[-*]\s*\[( |x|X)\]\s*(.+?)\s*$")
+
+
+def _todo_id(text):
+    import hashlib
+    return hashlib.md5(text.encode("utf-8")).hexdigest()[:10]
 
 
 def read_todo():
-    """ゆま待ちの しごと。新しい順に かえす"""
+    """台帳から 印のついた やり残しを ひろう"""
     out = []
     try:
-        names = os.listdir(TODO_DIR)
+        with open(TODO_FILE, "r", encoding="utf-8") as f:
+            lines = f.read().split("\n")
     except Exception:
         return out
-    for name in names:
-        if not name.endswith(".json") or name.startswith("_"):
+    for line in lines:
+        m = _TODO_LINE.match(line)
+        if not m or m.group(1) != " ":
+            continue                     # 見出しや、済みの行は とばす
+        body = m.group(2)
+        if TODO_MARK not in body:
             continue
-        path = os.path.join(TODO_DIR, name)
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                d = json.load(f)
-        except Exception:
+        title = body.replace(TODO_MARK, "").strip()
+        tag = ""
+        mt = re.search(r"#([^\s#]+)\s*$", title)
+        if mt:
+            tag = mt.group(1)
+            title = title[:mt.start()].strip()
+        title = title.strip(" 　・-—")
+        if not title:
             continue
-        d["id"] = d.get("id") or name[:-5]
-        try:
-            d["at"] = os.path.getmtime(path)
-        except Exception:
-            d["at"] = 0
-        out.append(d)
-    out.sort(key=lambda x: x.get("at", 0), reverse=True)
+        out.append({"id": _todo_id(body), "title": title,
+                    "session": tag, "why": "", "url": "", "raw": body})
     return out
 
 
 def done_todo(tid):
-    """おわった しごとを 消す"""
+    """その行の チェックを 付ける（消さずに 残す）"""
     if not tid:
         return False
-    safe = "".join(c for c in str(tid) if c.isalnum() or c in "-_.")
-    if not safe:
-        return False
-    path = os.path.join(TODO_DIR, safe + ".json")
     try:
-        os.remove(path)
+        with open(TODO_FILE, "r", encoding="utf-8") as f:
+            text = f.read()
+    except Exception:
+        return False
+    lines = text.split("\n")
+    hit = False
+    for i, line in enumerate(lines):
+        m = _TODO_LINE.match(line)
+        if not m or m.group(1) != " ":
+            continue
+        if _todo_id(m.group(2)) != tid:
+            continue
+        lines[i] = line.replace("[ ]", "[x]", 1)
+        hit = True
+        break
+    if not hit:
+        return False
+    try:
+        tmp = TODO_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(lines))
+        os.replace(tmp, TODO_FILE)
         return True
     except Exception:
         return False

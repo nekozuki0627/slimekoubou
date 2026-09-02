@@ -350,6 +350,8 @@ def snapshot():
             job = s["job"] if now < s["job_until"] else (s["job"] if s["busy"] else None)
             folder = os.path.basename((s.get("cwd") or "").rstrip("\\/")) or ""
             name = s.get("title") or folder or "むめい"
+            if is_task_session(name):
+                continue          # 時間で うごく しごと。スライムには しない
             out.append({
                 "id": sid,
                 "name": name,
@@ -624,6 +626,44 @@ def _task_label(path):
             t = line.split(":", 1)[1].strip()
             return t[:12] + ("…" if len(t) > 12 else "")
     return ""
+
+
+def task_ids():
+    """
+    定期タスクの 名まえ一覧。
+    時間で うごく しごとが 立てた セッションは、
+    会話の名まえが その まま タスクの名まえに なるので、
+    それを 手がかりに スライムから 外す
+    （スライム＝ゆまが 話している セッション、という決まりを 守るため）
+    """
+    import json as _json
+    out = set()
+    for path in _task_store():
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                data = _json.load(f)
+        except Exception:
+            continue
+        for t in data.get("scheduledTasks", []):
+            if t.get("id"):
+                out.add(str(t["id"]).lower())
+    return out
+
+
+# 会話の名まえに これが 入っていたら、時間で うごく しごと とみなす。
+# 自分で つけた 名まえでも 見分けられるように
+TASK_WORDS = ("自動", "（自動", "(自動")
+
+
+def is_task_session(name):
+    """その 会話は 定期タスクが 立てたものか"""
+    if not name:
+        return False
+    for w in TASK_WORDS:
+        if w in name:
+            return True
+    key = name.strip().lower().replace(" ", "-").replace("　", "-")
+    return key in task_ids()
 
 
 def next_task():

@@ -27,6 +27,7 @@ import monitor
 HERE = os.path.dirname(os.path.abspath(__file__))
 URL = f"http://127.0.0.1:{monitor.PORT}/?widget=1"
 STATE = os.path.join(HERE, "_widget.json")
+LOCK_PORT = 8898        # 二重に 開かないための 見はり口（8899 は 工房の 番号）
 
 # 部屋の かたち（1774×887）。これより 細長い/平たい 窓にしても
 # 部屋の まわりに 何もない ところが できるだけ なので、この形を たもつ
@@ -122,6 +123,23 @@ def watch(win):
             save_state(now)
 
 
+def only_one():
+    """すでに 開いていたら、もう1つ 出さない。
+
+    アイコンを 二度 押しても 窓が 2つに ならないように、
+    使っていない 番号を 1つ おさえて 見はりに する。
+    おさえられなければ すでに だれかが 開いている
+    """
+    import socket
+    sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sk.bind(("127.0.0.1", LOCK_PORT))
+        sk.listen(1)
+    except OSError:
+        return None          # すでに 開いている
+    return sk                # 閉じないよう 持ちつづける
+
+
 def start_server():
     # すでに動いていれば monitor 側が気づいて 静かに退く
     if "--quiet" not in sys.argv:
@@ -130,6 +148,9 @@ def start_server():
 
 
 def main():
+    lock = only_one()
+    if lock is None:
+        return              # すでに 出ている
     start_server()
     st = load_state()
     api = Api()

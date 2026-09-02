@@ -3,3 +3,4 @@ __pycache__/
 _access.log
 *.apk
 _state.json
+_kinds.log

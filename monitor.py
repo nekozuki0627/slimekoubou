@@ -350,7 +350,7 @@ def snapshot():
             job = s["job"] if now < s["job_until"] else (s["job"] if s["busy"] else None)
             folder = os.path.basename((s.get("cwd") or "").rstrip("\\/")) or ""
             name = s.get("title") or folder or "むめい"
-            if is_task_session(name):
+            if is_auto_session(sid, name):
                 continue          # 時間で うごく しごと。スライムには しない
             out.append({
                 "id": sid,
@@ -511,6 +511,7 @@ def lan_ip():
 
 _BRIDGE = {}
 _BRIDGE_AT = 0.0
+_KIND = {}          # sessionId → (kind, entrypoint)
 
 
 def bridge_ids():
@@ -537,9 +538,13 @@ def bridge_ids():
             except Exception:
                 continue
             sid = j.get("sessionId")
-            bid = j.get("bridgeSessionId")
-            if sid and bid:
-                out[sid] = bid
+            if not sid:
+                continue
+            if j.get("bridgeSessionId"):
+                out[sid] = j["bridgeSessionId"]
+            # その セッションの 素性。自動で 立ったものを 名まえに たよらず
+            # 見わけるための 手がかり
+            _KIND[sid] = (j.get("kind"), j.get("entrypoint"))
     except Exception:
         pass
     _BRIDGE = out
@@ -651,12 +656,48 @@ def task_ids():
 
 
 # 会話の名まえに これが 入っていたら、時間で うごく しごと とみなす。
-# 自分で つけた 名まえでも 見分けられるように
-TASK_WORDS = ("自動", "（自動", "(自動")
+#
+# これは「名づけの クセ」に たよった 目やすなので、
+# 人によって 変えてください。空 () にすれば 名まえでは 判断しません。
+# （素性で 見わける ほうが 確かです。HUMAN_KINDS を 見てください）
+TASK_WORDS = ("（自動", "(自動")
+
+
+# 人が 話している セッションの 素性。これ以外は 自動と みなす
+HUMAN_KINDS = {"interactive"}
+
+
+def note_kind(sid, name):
+    """はじめて 見た 素性を 書きとめておく（あとで 判断を よくするため）"""
+    k = _KIND.get(sid)
+    if not k or k[0] in HUMAN_KINDS:
+        return
+    try:
+        tab, nl = chr(9), chr(10)
+        line = (time.strftime("%Y-%m-%d %H:%M:%S") + tab + repr(k) + tab
+                + (name or "")[:40] + nl)
+        with open(os.path.join(HERE, "_kinds.log"), "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
+
+
+def is_auto_session(sid, name):
+    """
+    その 会話は 自動で 立ったものか。
+    まず 素性で 見わける（どの人でも 使える）。
+    素性が わからない ぶんは 名まえで 見わける（こちらは 目やす）
+    """
+    bridge_ids()                      # _KIND を ためておく
+    k = _KIND.get(sid)
+    if k and k[0] and k[0] not in HUMAN_KINDS:
+        note_kind(sid, name)
+        return True
+    return is_task_session(name)
 
 
 def is_task_session(name):
-    """その 会話は 定期タスクが 立てたものか"""
+    """名まえから 見わける（素性が わからない時の 目やす）"""
     if not name:
         return False
     for w in TASK_WORDS:

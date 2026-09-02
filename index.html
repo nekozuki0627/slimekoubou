@@ -167,6 +167,11 @@
     </div>
   </div>
 
+  <div id="todoBox" style="position:fixed;left:12px;bottom:12px;max-width:min(420px,46vw);
+       background:#fff;border:1px solid #e3ded2;border-radius:14px;padding:10px 12px;
+       box-shadow:0 4px 16px rgba(0,0,0,.10);font-size:13px;color:#4a5560;display:none;z-index:40">
+  </div>
+
   <div class="sheetWrap" id="qrWrap">
     <div class="sheet qrsheet">
       <h2>スマホで見る<button type="button" id="qrClose" aria-label="とじる">×</button></h2>
@@ -1223,6 +1228,37 @@
   const bySession = new Map();   // セッションの id → スライム
 
   // うごいているセッションの一覧。色の丸で、部屋のスライムと結びつける
+  // ゆま本人でないと できない しごと。おわったら ✓ で 消せる
+  function renderTodo(items){
+    const box = document.getElementById("todoBox");
+    if(!box) return;
+    if(!items || !items.length){ box.style.display = "none"; return; }
+    box.style.display = "block";
+    box.innerHTML = "";
+    const h = document.createElement("div");
+    h.textContent = "ゆまに おねがい　" + items.length + "件";
+    h.style.cssText = "font-weight:700;color:#8a3ea8;margin-bottom:6px";
+    box.appendChild(h);
+    items.forEach(t=>{
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:8px;align-items:flex-start;padding:4px 0";
+      const btn = document.createElement("button");
+      btn.textContent = "✓";
+      btn.title = "おわった";
+      btn.style.cssText = "flex:none;border:0;border-radius:50%;width:22px;height:22px;"
+        + "cursor:pointer;background:#e8e3d8;color:#4a5560;font-size:13px;line-height:1";
+      btn.onclick = ()=>{
+        fetch("/api/todo/done?id=" + encodeURIComponent(t.id)).then(()=> poll());
+      };
+      const txt = document.createElement("div");
+      txt.innerHTML = "<b>" + (t.title||"") + "</b>"
+        + (t.session ? "<br><span style='color:#8c94a0;font-size:11px'>"
+            + t.session + (t.why ? " ・ " + t.why : "") + "</span>" : "");
+      row.append(btn, txt);
+      box.appendChild(row);
+    });
+  }
+
   function renderLegend(visible){
     legendEl.innerHTML = "";
     visible.forEach(sess=>{
@@ -1308,6 +1344,7 @@
     try{
       const r = await fetch("api/status", {cache:"no-store"});
       const d = await r.json();
+      lastRaw = d;                      // todo など 一覧いがいの ぶんも 使う
       pcEverLinked = true;
       offline.style.display = "none";
       // 画面そのものが新しくなっていたら、だまって読み直す。
@@ -1332,6 +1369,7 @@
   const MAX_CHOICES = [1,2,3,4,5,6,7,8];   // 工房に入る上限
   let view = { mode: "auto", picked: [], max: 5 };
   let lastList = [];
+  let lastRaw = null;
 
   try{
     const d = JSON.parse(localStorage.getItem(VIEW_STORE) || "null");
@@ -1480,6 +1518,7 @@
       if(sl.bubLift !== sl.bubBase) sl.bubLift = sl.bubBase;
     });
 
+    renderTodo(lastRaw ? lastRaw.todo : null);
     renderLegend(visible);
 
     if(chatCool > 0) chatCool--;

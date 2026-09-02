@@ -380,8 +380,12 @@ def snapshot():
             return 3        # まだ 生きている
         return 4            # おわった子。押し出されるのは この子から
     out.sort(key=lambda x: (rank(x), x["idle"]))
+    todo = read_todo()
     return {"sessions": out, "total": len(out), "rev": page_rev(),
-            "soon": next_task()}
+            "soon": next_task(),
+            "todo": [{"id": t.get("id"), "title": t.get("title", ""),
+                      "session": t.get("session", ""), "why": t.get("why", ""),
+                      "url": t.get("url", "")} for t in todo]}
 
 
 def page_rev():
@@ -453,6 +457,13 @@ class Handler(BaseHTTPRequestHandler):
                 "pair_url": pair_url(),
                 "qr": qr_svg() is not None,
             }, ensure_ascii=False))
+        if path == "/api/todo/done":
+            from urllib.parse import parse_qs
+            q = parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+            tid = (q.get("id") or [""])[0]
+            ok = done_todo(tid)
+            return self._send(200 if ok else 404,
+                              json.dumps({"ok": ok}), "application/json; charset=utf-8")
         if path == "/qr_pair.svg":
             svg = qr_svg(pair_url())
             if svg is None:
@@ -750,6 +761,54 @@ def next_task():
         when = time.strftime("%m/%d %H:%M", lt).lstrip("0")
     _TASKS = {"when": when, "label": _task_label(t.get("filePath", ""))}
     return _TASKS
+
+
+# ── ゆま本人でないと できない しごと ──
+# 各セッションの トバが、ここに 1件 1ファイルで 書きおく。
+# 追記＝新しいファイルを作る／おわり＝そのファイルを消す。
+# こうすると 何本のセッションが 同時に 書いても こわれない
+TODO_DIR = os.path.join(os.path.expanduser("~"), ".claude", "yuma_todo")
+
+
+def read_todo():
+    """ゆま待ちの しごと。新しい順に かえす"""
+    out = []
+    try:
+        names = os.listdir(TODO_DIR)
+    except Exception:
+        return out
+    for name in names:
+        if not name.endswith(".json") or name.startswith("_"):
+            continue
+        path = os.path.join(TODO_DIR, name)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            continue
+        d["id"] = d.get("id") or name[:-5]
+        try:
+            d["at"] = os.path.getmtime(path)
+        except Exception:
+            d["at"] = 0
+        out.append(d)
+    out.sort(key=lambda x: x.get("at", 0), reverse=True)
+    return out
+
+
+def done_todo(tid):
+    """おわった しごとを 消す"""
+    if not tid:
+        return False
+    safe = "".join(c for c in str(tid) if c.isalnum() or c in "-_.")
+    if not safe:
+        return False
+    path = os.path.join(TODO_DIR, safe + ".json")
+    try:
+        os.remove(path)
+        return True
+    except Exception:
+        return False
 
 
 def ts_ip():

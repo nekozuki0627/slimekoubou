@@ -512,6 +512,8 @@
       for(const o of allSlimes){
         if(o === self || o.dying || !o.gp) continue;
         near = Math.min(near, p.dist(o.gp));
+        // 仲間の 行き先も よける。おなじ所を めざすと 結局かさなる
+        if(o.target) near = Math.min(near, p.dist(o.target) * 0.9);
       }
       if(near > bestScore){ bestScore = near; best = p; }
     }
@@ -905,8 +907,20 @@
       }
       const d = s.target.sub(s.gp);
       if(d.len() < 8){
-        if(rand() < (s.job ? 0.50 : 0.62)) s.rest = rand(1.0, s.job ? 3.0 : 4.4);
-        else s.target = floorPoint(s);
+        // いちばん近い 仲間との きょり
+        let near = 1e9;
+        for(const o of allSlimes){
+          if(o === s || o.dying || !o.gp) continue;
+          near = Math.min(near, s.gp.dist(o.gp));
+        }
+        if(s.rest > 0){
+          // 休んでいる間に つめられたら、空いている所へ 動きなおす
+          if(near < MIN_GAP * 0.86){ s.rest = 0; s.target = floorPoint(s); }
+        }else if(near < MIN_GAP * 1.15){
+          s.target = floorPoint(s);          // つまっている。ずれる
+        }else if(rand() < 0.80){
+          s.rest = rand(3.5, 10.5);          // 空いている。のんびりする
+        }else s.target = floorPoint(s);
       }else{
         s.mode = "walk";
         const v = d.unit().scale((s.job ? SPEED : SPEED*0.76)*dt());

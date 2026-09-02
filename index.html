@@ -102,26 +102,46 @@
   /* 見出しの帯は残して、状態だけを 小さく重ねる。
      スマホのウィジェットは 静止画で貼られることが多く、
      動かない絵だけだと 何が起きているか分からないため */
+  /* 窓は 部屋の かたちに 切りぬいてある（うしろが 透ける）。
+     目じるしは 部屋の外に あるので、その ぶんだけ
+     切りぬく形に 足してもらう（かたちは JS が 伝える）。
+     部屋の中に 置くと 吹き出しと ぶつかるので、外に 出しておく */
   body.widget header{position:absolute;top:0;left:0;right:0;z-index:20;
-    padding:5px 8px;pointer-events:none}
+    padding:4px 6px;pointer-events:none}
   body.widget .status{font-size:12px;color:#46525e;
-    background:rgba(255,255,255,.78);border-radius:999px;padding:4px 11px}
+    background:rgba(255,255,255,.86);border-radius:999px;padding:4px 11px;
+    box-shadow:0 1px 4px rgba(40,30,20,.28)}
   /* ウィジェット姿でも 設定は 出す。乗せた時だけ うっすら出る */
-  body.widget .gear{display:flex;opacity:0;transition:.2s}
-  body.widget:hover .gear{opacity:1}
-  .wclose{position:fixed;right:5px;top:3px;z-index:60;width:26px;height:26px;
-    border:0;border-radius:50%;cursor:pointer;font:inherit;font-size:15px;
-    color:#6b7681;background:rgba(255,255,255,.75);opacity:0;transition:.2s;
+  body.widget .gear{display:flex;position:absolute;right:36px;top:5px;
+    width:24px;height:24px;font-size:13px;margin:0;color:#7d8790;
+    background:rgba(255,255,255,.62);opacity:.72;transition:.2s;z-index:61}
+  body.widget:hover .gear{opacity:1;background:rgba(255,255,255,.92)}
+  /* ウィジェット姿の ボタン。
+     うしろを 透かすと、なにも 描いていない ところは クリックが
+     デスクトップへ すり抜ける。まったくの透明に すると 押せなくなるので、
+     ふだんも うっすら 残しておいて、乗せた時に はっきりさせる */
+  /* 切りぬく形は 動きに あわせて 変えられないので、
+     ボタンを 消すと そこだけ 白い まるが 残ってしまう。
+     だから ふだんも うっすら 出しておいて、乗せた時に はっきりさせる */
+  .wclose{position:absolute;right:6px;top:5px;z-index:61;width:24px;height:24px;
+    border:0;border-radius:50%;cursor:pointer;font:inherit;font-size:14px;
+    color:#7d8790;background:rgba(255,255,255,.62);opacity:.72;transition:.2s;
     display:none;align-items:center;justify-content:center;padding:0}
   body.widget .wclose{display:flex}
-  body.widget:hover .wclose{opacity:1}
+  body.widget .wclose:hover{color:#c4443a}
+  body.widget:hover .wclose{opacity:1;background:rgba(255,255,255,.92)}
   /* まどの 右下の すみ。枠なしの窓には ふちが無いので 自分で 用意する */
-  .wgrip{position:fixed;right:0;bottom:0;z-index:60;width:28px;height:28px;
+  /* 大きさを 変える つまみ。部屋の いちばん手前の かどに 置く
+     （窓の すみは 切りぬかれていて、もう 窓では ないため） */
+  .wgrip{position:absolute;right:2px;bottom:2px;z-index:60;width:28px;height:28px;
     cursor:nwse-resize;display:none;opacity:0;transition:.2s}
-  .wgrip::after{content:"";position:absolute;right:6px;bottom:6px;width:12px;height:12px;
-    border-right:2px solid #8c98a3;border-bottom:2px solid #8c98a3;border-radius:0 0 3px 0}
-  body.widget .wgrip{display:block}
-  body.widget:hover .wgrip{opacity:.85}
+  .wgrip::before{content:"";position:absolute;inset:2px;border-radius:50%;
+    background:rgba(255,255,255,.62)}
+  .wgrip::after{content:"";position:absolute;right:8px;bottom:8px;width:9px;height:9px;
+    border-right:2px solid #8b959e;border-bottom:2px solid #8b959e;border-radius:0 0 3px 0}
+  body.widget .wgrip{display:block;opacity:.72}
+  body.widget:hover .wgrip{opacity:1}
+  body.widget .wgrip:hover::before{background:rgba(255,255,255,.92)}
 
   /* せってい。かべがみアプリと 同じ ならび・同じ ことば */
   .sheet.cfg{max-height:86vh}
@@ -279,6 +299,8 @@
 
   // 部屋の原寸（room.png）を内部解像度にする。CSSで画面に合わせて縮小
   const RW=1774, RH=887;
+  // デスクトップに 置く 姿かどうか。あちこちで 見るので 先に 決めておく
+  const WIDGET = /[?&]widget/.test(location.search);
 
   const k = kaplay({
     canvas: document.getElementById("game"),
@@ -849,6 +871,27 @@
     return vec2(e.x + dx/l*2, e.y + dy/l*2);
   }
 
+  // 部屋の絵の かたち（行ごとの 左端〜右端。絵のはばに対する 割合）。
+  // ウィジェット姿では 窓を この形に 切りぬくので、
+  // 外に出た ことばは 消えてしまう。はみ出さないように 引きもどす
+  const ROOM_SPAN = [[0.3968,0.4002],[0.3968,0.4002],[0.3348,0.4966],[0.2706,0.5964],
+    [0.2041,0.6939],[0.1415,0.788],[0.0772,0.8839],[0.0158,0.9786],[0.0163,0.9853],
+    [0.0197,0.982],[0.0203,0.9814],[0.0209,0.9803],[0.0209,0.9803],[0.0214,0.9791],
+    [0.022,0.9786],[0.0225,0.978],[0.0231,0.9775],[0.022,0.9769],[0.0118,0.987],
+    [0.0056,0.9921],[0.0079,0.9904],[0.0051,0.9927],[0.0338,0.969],[0.0727,0.9374],
+    [0.1094,0.9087],[0.1471,0.8782],[0.1855,0.8484],[0.2221,0.8185],[0.2576,0.7897],
+    [0.2954,0.7604],[0.336,0.7311],[0.6629,0.7148],[0.6629,0.7148]];
+
+  const ROOM_TOP = 29, ROOM_BOT = 839;   // 部屋の絵が ある たての はんい
+
+  /** その 高さでの 部屋の 左端・右端 */
+  function roomSpan(y){
+    const t = Math.max(0, Math.min(1, y / RH)) * (ROOM_SPAN.length - 1);
+    const i = Math.min(ROOM_SPAN.length - 2, Math.floor(t)), f = t - i;
+    const a = ROOM_SPAN[i], b = ROOM_SPAN[i + 1];
+    return [(a[0] + (b[0] - a[0]) * f) * RW, (a[1] + (b[1] - a[1]) * f) * RW];
+  }
+
   const LABEL_Z = 50000;       // 名札・ことばは 部屋のものより ぜんぶ上
   const allSlimes = [];        // いま部屋にいる子たち（場所えらびで使う）
 
@@ -1141,10 +1184,20 @@
     bx = Math.max(8, Math.min(bx, RW - bw - 8));            // 画面からはみ出さない
     const btop = upper ? (top - BUB_PH - s.bubLift)
                        : (s.gp.y + 6 + s.bubLift);
-    s.back.pos = vec2(bx, btop);
+    let by = btop;
+    if(WIDGET){
+      // 窓を 部屋の形に 切りぬいてあるので、はみ出すと ことばが 消える。
+      // まず たてを 部屋の中に、つぎに その高さでの はばに あわせる
+      by = Math.max(ROOM_TOP + 4, Math.min(by, ROOM_BOT - BUB_PH - 4));
+      const a = roomSpan(by), b = roomSpan(by + BUB_PH);
+      const lo = Math.max(a[0], b[0]) + 10, hi = Math.min(a[1], b[1]) - 10;
+      if(hi - lo > bw) bx = Math.max(lo, Math.min(bx, hi - bw));
+      else bx = (lo + hi) / 2 - bw / 2;
+    }
+    s.back.pos = vec2(bx, by);
     s.back.width = bw; s.back.height = BUB_PH;
     s.back.z = LABEL_Z + s.gp.y + 1;
-    s.bub.pos = vec2(bx + bw/2, btop + BUB_PCY);
+    s.bub.pos = vec2(bx + bw/2, by + BUB_PCY);
     s.bub.z = LABEL_Z + s.gp.y + 2;
 
   }
@@ -1829,11 +1882,18 @@
   const pickHint  = document.getElementById("pickHint");
   const hiddenNote= document.getElementById("hiddenNote");
 
-  document.getElementById("pickBtn").addEventListener("click", ()=>{
-    renderPicker(); sheetWrap.classList.add("open");
-  });
-  document.getElementById("sheetClose").addEventListener("click", ()=> sheetWrap.classList.remove("open"));
-  sheetWrap.addEventListener("click", (e)=>{ if(e.target === sheetWrap) sheetWrap.classList.remove("open"); });
+  // 窓は 部屋の かたちに 切りぬいてある。
+  // 設定は 窓ぜんたいに かぶせて 出すので、開いている間だけ 四角にもどす
+  function sheetShape(open){
+    if(!WIDGET || !window.pywebview || !window.pywebview.api.shape) return;
+    try{ window.pywebview.api.shape(!!open); }catch(e){}
+  }
+  function openSheet(){ renderPicker(); sheetWrap.classList.add("open"); sheetShape(true); }
+  function closeSheet(){ sheetWrap.classList.remove("open"); sheetShape(false); }
+
+  document.getElementById("pickBtn").addEventListener("click", openSheet);
+  document.getElementById("sheetClose").addEventListener("click", closeSheet);
+  sheetWrap.addEventListener("click", (e)=>{ if(e.target === sheetWrap) closeSheet(); });
   // ウィジェット姿では 窓の どこを つかんでも 窓が動いてしまうので、
   // 設定の中だけは つかんでも 動かないようにする
   sheetWrap.addEventListener("mousedown", (e)=> e.stopPropagation(), true);
@@ -2040,6 +2100,7 @@
 
     renderTodo(lastRaw ? lastRaw.todo : null);
     renderLegend(visible);
+    if(WIDGET) tellChrome();
 
     if(chatCool > 0) chatCool--;
     tryStartChat();
@@ -2075,11 +2136,39 @@
 
   // ── ウィジェット姿かどうか ──
   // デスクトップに置く時は 見出しも一覧も出さず、部屋だけを 背景ぬきで見せる
-  if(/[?&]widget/.test(location.search)){
+  if(WIDGET){
     document.body.classList.add("widget");
+    window.addEventListener("resize", ()=>{ tellChrome.last = null; tellChrome(); });
+    setTimeout(tellChrome, 600);
     document.getElementById("wclose").addEventListener("click", ()=>{
       try{ window.pywebview.api.quit(); }catch(e){ window.close(); }
     });
+  }
+
+  // ── 目じるしの かたちを 伝える ──
+  // 窓は 部屋の かたちに 切りぬかれている。
+  // 部屋の外に ある 帯や ボタンは そのままだと 消えてしまうので、
+  // 「ここも 窓に 残して」と 場所を 伝える。
+  // 窓の 大きさに 左右されないよう、割合で 渡す
+  function tellChrome(){
+    if(!window.pywebview || !window.pywebview.api.chrome) return;
+    const W = window.innerWidth, H = window.innerHeight;
+    if(!W || !H) return;
+    const out = [];
+    for(const sel of [".status", ".gear", ".wclose", ".wgrip"]){
+      const el = document.querySelector(sel);
+      if(!el || el.offsetParent === null) continue;
+      const r = el.getBoundingClientRect();
+      if(r.width < 1 || r.height < 1) continue;
+      const cs = getComputedStyle(el);
+      let rad = parseFloat(cs.borderTopLeftRadius) || 0;
+      rad = Math.min(rad, Math.min(r.width, r.height) / 2);
+      out.push([(r.left - 3)/W, (r.top - 3)/H, (r.width + 6)/W, (r.height + 6)/H, rad/W]);
+    }
+    const key = JSON.stringify(out);
+    if(key === tellChrome.last) return;      // 変わっていなければ 送らない
+    tellChrome.last = key;
+    try{ window.pywebview.api.chrome(out); }catch(e){}
   }
 
   // ── まどの 大きさ ──
@@ -2093,39 +2182,14 @@
     const grip = document.getElementById("wgrip");
     if(!grip) return;
     grip.addEventListener("pointerdown", (e)=>{
-      if(!window.pywebview) return;
+      if(!window.pywebview || !window.pywebview.api.grab) return;
       // ここで 止めないと「どこでも つかんで動かせる」ほうが 先に効いて、
       // 大きさを 変えるつもりが 窓ごと 動いてしまう
       e.preventDefault(); e.stopPropagation();
-      // 窓を 大きくしていく あいだ、指は 窓の外に はみ出す。
-      // つかみっぱなしに しておかないと、外に出たとたん 動きが 届かなくなる
-      try{ grip.setPointerCapture(e.pointerId); }catch(err){}
-      window.pywebview.api.size().then(s0=>{
-        const x0 = e.screenX, y0 = e.screenY;
-        // 窓の「大きさ」の数えかたと、この画面の 1ますは 同じとは かぎらない
-        // （画面の 拡大率しだい）。いまの 窓の はばで 比べて そろえる
-        const unit = (window.innerWidth > 0) ? (s0.w / window.innerWidth) : 1;
-        let want = null, waiting = false;
-        function move(ev){
-          ev.preventDefault();
-          want = [s0.w + (ev.screenX - x0)*unit, s0.h + (ev.screenY - y0)*unit];
-          if(waiting) return;
-          waiting = true;
-          requestAnimationFrame(()=>{
-            waiting = false;
-            if(want) setWinSize(want[0], want[1]);
-          });
-        }
-        function up(){
-          grip.removeEventListener("pointermove", move);
-          grip.removeEventListener("pointerup", up);
-          grip.removeEventListener("pointercancel", up);
-          if(want) setWinSize(want[0], want[1]);   // 最後の ひとふり を とりこぼさない
-        }
-        grip.addEventListener("pointermove", move);
-        grip.addEventListener("pointerup", up);
-        grip.addEventListener("pointercancel", up);
-      });
+      // あとは 窓のがわが 指を 追いかける。
+      // 窓は 部屋の かたちに 切りぬいてあり、大きくしていく あいだ
+      // 指は かたちの外へ 出てしまうので、画面の中では 追いきれない
+      try{ window.pywebview.api.grab(); }catch(err){}
     }, true);
   })();
 

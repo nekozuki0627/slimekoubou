@@ -72,6 +72,14 @@
   .legend .st.rest{color:#98a3ad;background:#eef1f3}
   .legend .st.wait{color:#4c6d92;background:#e2ebf6}
   .legend .st.urg{color:#fff;background:#e2622c}
+  /* ゆま本人でないと できない用件。一覧と 同じ形で、色だけ 変える */
+  .legend.todo{margin-bottom:6px;pointer-events:auto}
+  .legend.todo .row{background:rgba(252,246,255,.92);border-color:rgba(206,176,222,.9)}
+  .legend.todo .nm{color:#5c2f70}
+  .legend.todo .st{color:#8a3ea8;background:#f2e4f8}
+  .legend.todo .done{flex:none;border:0;cursor:pointer;width:19px;height:19px;
+    border-radius:50%;background:#e6d6ef;color:#5c2f70;font-size:12px;line-height:1;padding:0}
+  .legend.todo .done:hover{background:#d7bfe6}
   /* 細い画面では 部屋をなるべく大きく見せたい。
      一覧は 折り返さず1行にして、はみ出すぶんは 横になぞって読む */
   @media (max-width: 560px){
@@ -150,6 +158,7 @@
   <main><canvas id="game"></canvas></main>
 
   <footer>
+    <div class="legend todo" id="todoBox"></div>
     <div class="legend" id="legend"></div>
     <div class="bar">
       <button class="btn" id="phoneBtn" hidden>スマホで見る</button>
@@ -165,11 +174,6 @@
       <ul id="sessList"></ul>
       <p class="hint" id="pickHint">工房がせまいので、いちどに5ひきまでだよ</p>
     </div>
-  </div>
-
-  <div id="todoBox" style="position:fixed;left:12px;bottom:12px;max-width:min(420px,46vw);
-       background:#fff;border:1px solid #e3ded2;border-radius:14px;padding:10px 12px;
-       box-shadow:0 4px 16px rgba(0,0,0,.10);font-size:13px;color:#4a5560;display:none;z-index:40">
   </div>
 
   <div class="sheetWrap" id="qrWrap">
@@ -1228,33 +1232,30 @@
   const bySession = new Map();   // セッションの id → スライム
 
   // うごいているセッションの一覧。色の丸で、部屋のスライムと結びつける
-  // ゆま本人でないと できない しごと。おわったら ✓ で 消せる
+  // ゆま本人でないと できない用件。
+  // 部屋の外の 一覧と 同じ形で ならべる（色だけ 変えて 目に入るように）
   function renderTodo(items){
     const box = document.getElementById("todoBox");
     if(!box) return;
-    if(!items || !items.length){ box.style.display = "none"; return; }
-    box.style.display = "block";
     box.innerHTML = "";
-    const h = document.createElement("div");
-    h.textContent = "ゆまに おねがい　" + items.length + "件";
-    h.style.cssText = "font-weight:700;color:#8a3ea8;margin-bottom:6px";
-    box.appendChild(h);
+    if(!items || !items.length) return;
     items.forEach(t=>{
-      const row = document.createElement("div");
-      row.style.cssText = "display:flex;gap:8px;align-items:flex-start;padding:4px 0";
+      const row = document.createElement("div"); row.className = "row";
       const btn = document.createElement("button");
-      btn.textContent = "✓";
-      btn.title = "おわった";
-      btn.style.cssText = "flex:none;border:0;border-radius:50%;width:22px;height:22px;"
-        + "cursor:pointer;background:#e8e3d8;color:#4a5560;font-size:13px;line-height:1";
+      btn.className = "done"; btn.type = "button";
+      btn.textContent = "✓"; btn.title = "おわった";
       btn.onclick = ()=>{
         fetch("/api/todo/done?id=" + encodeURIComponent(t.id)).then(()=> poll());
       };
-      const txt = document.createElement("div");
-      txt.innerHTML = "<b>" + (t.title||"") + "</b>"
-        + (t.session ? "<br><span style='color:#8c94a0;font-size:11px'>"
-            + t.session + (t.why ? " ・ " + t.why : "") + "</span>" : "");
-      row.append(btn, txt);
+      const nm = document.createElement("span");
+      nm.className = "nm"; nm.textContent = t.title || "";
+      if(t.why) nm.title = t.why;
+      row.append(btn, nm);
+      if(t.session){
+        const st = document.createElement("span");
+        st.className = "st"; st.textContent = t.session;
+        row.appendChild(st);
+      }
       box.appendChild(row);
     });
   }

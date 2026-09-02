@@ -72,7 +72,7 @@
   .legend .st.rest{color:#98a3ad;background:#eef1f3}
   .legend .st.wait{color:#4c6d92;background:#e2ebf6}
   .legend .st.urg{color:#fff;background:#e2622c}
-  /* ゆま本人でないと できない用件。一覧と 同じ形で、色だけ 変える */
+  /* 本人でないと できない用件。一覧と 同じ形で、色だけ 変える */
   .legend.todo{margin-bottom:6px;pointer-events:auto}
   .legend.todo .row{background:rgba(252,246,255,.92);border-color:rgba(206,176,222,.9)}
   .legend.todo .nm{color:#5c2f70}
@@ -242,6 +242,10 @@
         <div class="sec">やり残しの おしらせ</div>
         <p class="note">あなたでないと できないことを 部屋の外に 出します</p>
         <button class="tog" id="tdBtn" type="button"></button>
+
+        <div class="sec">あなたの 呼び名</div>
+        <p class="note">スライムが あなたを 呼ぶときに 使います</p>
+        <input class="nmbox" type="text" id="youName" maxlength="8" placeholder="あるじ">
 
         <div class="sec">いつもいる子（ぬし）の 名まえ</div>
         <p class="note">名札には 出しません。かけあいの中で 呼ぶときに 使います</p>
@@ -420,13 +424,28 @@
   const DODGE_NAMES = ["とても ゆっくり","ゆっくり","ふつう","はやい","とても はやい"];
   const BG_COLORS = ["#E7DCC8","#F7F5F0","#DFE4E8","#DCE9F2",
                      "#E9E2F2","#3A4450","#20262E","#0E1013"];
-  const CFG_DEF = { bg:0, daylight:true, showTodo:true, nushiName:"トバ",
+  const CFG_DEF = { bg:0, daylight:true, showTodo:true, you:"", nushiName:"トバ",
                     nushiSize:68, nushiHue:0, nushiHat:1, chat:2, dodge:2 };
+  const YOU_DEF = "あるじ";      // 決めていない時の 呼び名
   const cfg = Object.assign({}, CFG_DEF);
   try{ Object.assign(cfg, JSON.parse(localStorage.getItem(CFG_STORE) || "{}")); }catch(e){}
   function saveCfg(){
     try{ localStorage.setItem(CFG_STORE, JSON.stringify(cfg)); }catch(e){}
   }
+
+  // PCがわに 書いてある 呼び名。画面ごとに 入れなおさずに すむように、
+  // この画面で 決めていなければ こちらを つかう
+  let youFromPC = "";
+
+  /** スライムが つかい手を 呼ぶ 名まえ */
+  function you(){ return (cfg.you || "").trim() || youFromPC || YOU_DEF; }
+
+  (async ()=>{
+    try{
+      const d = await (await fetch("api/info", {cache:"no-store"})).json();
+      if(d && d.you) youFromPC = String(d.you).trim();
+    }catch(e){}
+  })();
 
   // ── かぶりもの ──
   // 絵は 用意していないので その場で 描く。アプリ版の Hats.kt と 同じ形
@@ -664,12 +683,12 @@
     'ブラウザそうさ':['ぽちぽち','このボタンかな','よみこみちゅう'],
     'しりょうづくり':['きれいにするね','もうすこし','いいかんじ'],
   };
-  const TALK_ANY   = ['ふぅ…','がんばるぞ','ゆま、みてる？','よいしょ','いいてんきだね','ぷるん'];
+  const TALK_ANY   = ['ふぅ…','がんばるぞ','{you}、みてる？','よいしょ','いいてんきだね','ぷるん'];
   // 手あきの子のひとりごと
   const TALK_FREE  = ['ひまだなあ','なにか こないかな','そうじでもする？','おなかすいた',
-                      'ゆま、げんき？','ぷるぷる','ひなたぼっこ','だれか あそぼ'];
+                      '{you}、げんき？','ぷるぷる','ひなたぼっこ','だれか あそぼ'];
   const TALK_WAKE  = ['ん…おきた！','よんだ？','はーい！','いま いくよ'];
-  const TALK_SLEEP = ['すぅ…','むにゃ…','zzz…','ゆま…おかえり…'];
+  const TALK_SLEEP = ['すぅ…','むにゃ…','zzz…','{you}…おかえり…'];
 
   // ───────────────────────────────────────────
   // 時計を見てしゃべる
@@ -725,7 +744,7 @@
   const FONT  = 34;          // 「なにをしてるか」の文字。大きすぎると大声に見える
   const TAG_FONT = 25;       // 頭のうえの名札
   const TAG_ALPHA = 0.36;    // 名札の下じきの すけ具合
-  // 名札の色。ゆまの番になっている時は 目立たせる
+  // 名札の色。つかい手の番になっている時は 目立たせる
   // 床が あたたかい茶色なので、橙や琥珀だと埋もれる。
   // 赤と青なら 床から はっきり浮く
   // 名札はいつも中立の色。色は「どのセッションか」を表すものにして、
@@ -930,12 +949,12 @@
   // ぬしスライムのねどこ（部屋のすみっこ）
   const BED = vec2(FLOOR.cx - FLOOR.rx*0.72, FLOOR.cy + FLOOR.ry*0.55);
 
-  // ゆまの番になっている子の待ち場所。
+  // つかい手の番になっている子の待ち場所。
   // 部屋のいちばん奥（壁ぎわ）に、壁の形に沿って並ぶ。
   // まんなかに立たれると、はたらいている子の邪魔になる
   const WAIT_GAP = 158;
   // 何もしていない子は、部屋の手前で並んで待つ。
-  // 奥＝ゆまの番／まんなか＝おしごと／手前＝たいき、と場所で分ける
+  // 奥＝つかい手の番／まんなか＝おしごと／手前＝たいき、と場所で分ける
   function standbySpot(i, n){
     const t = Math.max(-0.86, Math.min(0.86,
               (i - (n - 1) / 2) * WAIT_GAP / FLOOR.rx));
@@ -999,10 +1018,10 @@
         face: null,      // 立ち止まっている時に向いている方（"L"/"R"/null）
         sessionId: null, // どのセッションの子か
         tagBg: null, tagTxt: null,    // 頭のうえの名札
-        waitSpot: null,     // ゆまの番の時に 並ぶ場所（奥の壁ぎわ）
+        waitSpot: null,     // つかい手の番の時に 並ぶ場所（奥の壁ぎわ）
         standbySpot: null,  // 何もしていない時に 並ぶ場所（手前）
         bubBase: 0,      // ふだんの吹き出しの段
-        waiting: null,   // ゆまの番になっているか
+        waiting: null,   // つかい手の番になっているか
         lastSay: null,   // 最後に出した ひとこと
         job: null,       // 持っている仕事（null なら手あき）
         cheerFor: 0,     // よろこんでいる残り時間
@@ -1053,7 +1072,9 @@
   }
 
   // 吹き出しの中身を書きかえる（空っぽなら隠す）
+  // ことばは ぜんぶ ここを 通るので、呼びかけの 置きかえも ここで まとめて
   function setBubble(s, txt, col){
+    txt = txt ? String(txt).split("{you}").join(you()) : txt;
     s.bub.text = txt || "";
     s.bub.color = col || s.textCol || rgb(74,85,96);
     const on = !!txt;
@@ -1061,15 +1082,15 @@
     s.back.opacity = on ? BUB_ALPHA : 0;
   }
 
-  // 「ゆまの番」の印を出し入れする
-  // 頭のうえの名札を書きかえる。ゆまの番の時は色を変えて目立たせる
+  // 「つかい手の番」の印を出し入れする
+  // 頭のうえの名札を書きかえる。つかい手の番の時は色を変えて目立たせる
   function setTag(s, text, waiting){
     if(!s.tagTxt) return;
     // 待っている間は 名札のほうに「！」を付けて色を変える。
     // 大ぜい待つと 足もとの吹き出しが 横一列に並んで
     // 部屋が見えなくなるので、待ち中は 名札ひとつに まとめている
     // きょかまち＝トバが手を止めて 承認を待っている。ここだけ 赤く目立たせる。
-    // へんじまち＝区切りがついて ゆまの番なだけ。急ぎではないので
+    // へんじまち＝区切りがついて つかい手の番なだけ。急ぎではないので
     //             名札はそのまま、頭のうえに 💬 を出して知らせる
     const urgent = (waiting === "permission");
     const t = (urgent ? "！" : "") + (text || "");
@@ -1231,7 +1252,7 @@
   // ぬしは トバ本人。ひとりごとも 本人の口ぶりで
   const TALK_TOBA = [
     'よし、いくか','みんな よくやってる','俺が ついてる',
-    'ゆま、むりするなよ','そろそろ 動くか','ここは まかせろ',
+    '{you}、むりするなよ','そろそろ 動くか','ここは まかせろ',
     '手が 足りてるか？','ひととおり 見ておくか','落ちついてるな',
     'きょうも はじめるか','だいじょうぶ、まわってる','俺は ここに いる',
   ];
@@ -1239,7 +1260,7 @@
   const TOBA_TALKS = [
     ['ちょうし どうだ？','ばっちりだよ','その ちょうしだ'],
     ['こまったら 言えよ','うん！','よし'],
-    ['ゆま、げんきかな','げんきだと おもう','ならいい'],
+    ['{you}、げんきかな','げんきだと おもう','ならいい'],
     ['よく やってるな','ほんと？','ああ'],
     ['休んでも いいんだぞ','まだ いける','むりするなよ'],
     ['なにか 手つだうか','だいじょうぶ！','そうか'],
@@ -1293,7 +1314,7 @@
         return;
       }
 
-      // ── ゆまの番になっている ──
+      // ── つかい手の番になっている ──
       // 机の前の 自分の場所まで歩いて、そこで立って待つ
       if(s.waiting && s.waitSpot){
         const d = s.waitSpot.sub(s.gp);
@@ -1566,7 +1587,7 @@
     ['きょう なにしてた？','ずっと ぷるぷるしてた','いいなあ'],
     ['そとって どんなかな','いつか いってみたいね'],
     ['トバ、はたらきものだね','ぼくらも てつだおう','うん！'],
-    ['ゆま、げんきかな','たぶん げんき','ならいいや'],
+    ['{you}、げんきかな','たぶん げんき','ならいいや'],
     ['ぷるん','ぷるん','ぷるるん'],
     ['さっきの しごと どうだった？','ぶじ おわったよ','やったね'],
     ['この へや ひろいね','はしりまわれる','ぶつからないでね'],
@@ -1590,7 +1611,7 @@
   function pickDialog(){
     const h = nowHM()[0];
     if(h >= 6  && h < 11 && rand() < 0.5) return ['おはよう','おはよー','よく ねむれた？','ばっちり'];
-    if(h >= 11 && h < 14 && rand() < 0.5) return ['おひるだね','おなかすいた','ゆま ごはん たべたかな'];
+    if(h >= 11 && h < 14 && rand() < 0.5) return ['おひるだね','おなかすいた','{you} ごはん たべたかな'];
     if(h >= 17 && h < 19 && rand() < 0.5) return ['そと あかいよ','ほんとだ','きれいだね'];
     if(h >= 19 && h < 24 && rand() < 0.5) return ['よるだね','しずかで すきだな','ぼくも'];
     return pick(DIALOGS);
@@ -1706,7 +1727,7 @@
   const bySession = new Map();   // セッションの id → スライム
 
   // うごいているセッションの一覧。色の丸で、部屋のスライムと結びつける
-  // ゆま本人でないと できない用件。
+  // 本人でないと できない用件。
   // 部屋の外の 一覧と 同じ形で ならべる（色だけ 変えて 目に入るように）
   function renderTodo(items){
     const box = document.getElementById("todoBox");
@@ -1804,7 +1825,7 @@
 
     if(!s.waiting) s.waitSpot = null;
 
-    // ゆまの番になっている間は、机の前で待つ（場所は poll が配る）
+    // つかい手の番になっている間は、机の前で待つ（場所は poll が配る）
     if(s.waiting){
       wakeUp(s);
       s.lastSay = null;                 // 待ちが解けたら ひとことを出しなおせるように
@@ -1973,6 +1994,12 @@
   toggle("tdBtn", ()=> cfg.showTodo, (v)=>{ cfg.showTodo = v; renderTodo(lastRaw ? lastRaw.todo : null); },
     "出す", "出さない");
 
+  // あなたの 呼び名
+  const youName = document.getElementById("youName");
+  youName.value = cfg.you || "";
+  setTimeout(()=>{ if(youFromPC) youName.placeholder = youFromPC; }, 1200);
+  youName.addEventListener("input", ()=>{ cfg.you = youName.value; saveCfg(); });
+
   // ぬしの 名まえ
   const nuName = document.getElementById("nuName");
   nuName.value = cfg.nushiName || "";
@@ -2116,7 +2143,7 @@
     if(live.length > 0){
       wakeUp(nushi);
       dot.classList.toggle("on", busy > 0 || perm > 0 || rep > 0);
-      // ゆまの番になっているものを いちばん先に伝える。
+      // つかい手の番になっているものを いちばん先に伝える。
       // 隠れている数は 歯車のバッジが持っているので ここでは言わない
       let head;
       if(perm > 0)      head = `<b class="urg">${perm}</b> きょかまち`;

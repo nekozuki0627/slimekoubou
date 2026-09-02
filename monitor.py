@@ -458,6 +458,7 @@ class Handler(BaseHTTPRequestHandler):
                 "phone_url": f"http://{phone_ip()}:{PORT}/",
                 "pair_url": pair_url(),
                 "qr": qr_svg() is not None,
+                "you": USER_NAME,
             }, ensure_ascii=False))
         if path == "/api/todo/done":
             from urllib.parse import parse_qs
@@ -777,12 +778,16 @@ def next_task():
 # 人によって 台帳の 置き場は ちがうので、決めうちに しない
 TODO_FILE = os.path.join(HERE, "todo.md")
 TODO_MARK = "@me"
+# スライムが つかい手を 呼ぶ 名まえ。ここに 書いておくと、
+# このPCで 見る どの画面でも 同じ 呼び名に なる（画面ごとに 入れなおさずに すむ）
+USER_NAME = ""
 
 try:
     with open(os.path.join(HERE, "_config.json"), "r", encoding="utf-8") as _f:
         _cfg = json.load(_f)
     TODO_FILE = os.path.expanduser(_cfg.get("todo_file") or TODO_FILE)
     TODO_MARK = _cfg.get("todo_mark") or TODO_MARK
+    USER_NAME = (_cfg.get("user_name") or "").strip()
 except Exception:
     pass
 

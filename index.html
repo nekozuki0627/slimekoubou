@@ -719,6 +719,61 @@
   // 絵のとおりの 多角形で切る。ここには だれも立てない
   const TB_POLY = [[850,462],[1076,540],[1080,600],[928,690],[880,690],[688,600],[680,526]];
   const TABLE_IMG = { x: 670, y: 452, front: 700 };
+
+  // ── テーブルの 前後 ──
+  // テーブルは 奥にいる子の「うえ」に かさねて 前後を出している。
+  // ところが 目じるしを 1本の線（front）だけに すると、
+  // テーブルの 左右の はしでは 前後が さかさまになる。
+  //   … テーブルの 手前のふちは まんなかが いちばん下（y690）で、
+  //     左右の はしへ行くほど 上がる（x680 では y526）。
+  //     だから 左のはしの すぐ手前（y650）に立つと、
+  //     じっさいは 手前なのに 線より 上なので うしろ扱いになり、
+  //     体の下半分が テーブルに 食われてしまう。
+  // そこで「その 横いちでの 手前のふち」を そのつど 出して くらべる。
+  const BODY_HALF = 64;      // 体の はばの はんぶん（体は 129）
+
+  /** その 横いち x での、テーブルの 手前のふち。はばの外なら null */
+  function tableFrontAt(x){
+    let front = null;
+    for(let i = 0; i < TB_POLY.length; i++){
+      const a = TB_POLY[i], b = TB_POLY[(i+1) % TB_POLY.length];
+      if(x < Math.min(a[0], b[0]) || x > Math.max(a[0], b[0])) continue;
+      const dx = b[0] - a[0];
+      const y = (Math.abs(dx) < 1e-6) ? Math.max(a[1], b[1])
+                                      : a[1] + (b[1] - a[1]) * ((x - a[0]) / dx);
+      if(front === null || y > front) front = y;
+    }
+    return front;
+  }
+
+  const TB_X0 = Math.min(...TB_POLY.map(p => p[0]));
+  const TB_X1 = Math.max(...TB_POLY.map(p => p[0]));
+
+  /**
+   * 前後は「足もとの いち」で 決める。
+   * 体の はばぶんまで 見にいくと 用心しすぎて、
+   * テーブルの すぐ手前に 立っただけで うしろ扱いに なってしまう。
+   *
+   * ただし 足もとが テーブルの 横はばの 外でも、
+   * 体が テーブルに かかっていれば くらべる必要が あるので、
+   * その時は いちばん近い はしで くらべる
+   */
+  function tableFrontNear(x, half){
+    if(x + half < TB_X0 || x - half > TB_X1) return null;   // 体ごと 横に はずれている
+    return tableFrontAt(Math.max(TB_X0, Math.min(TB_X1, x)));
+  }
+
+  /**
+   * その子を どの段に 置くか。
+   * テーブルより 手前なら テーブルの上、うしろなら テーブルの下に なるよう
+   * front(700) を またがせる。仲間どうしの 前後は これまでどおり 足もとの y 順
+   */
+  function depthOf(p, half){
+    const f = tableFrontNear(p.x, half === undefined ? BODY_HALF : half);
+    if(f === null) return p.y;                       // テーブルの 横はばの外
+    return (p.y > f) ? Math.max(p.y, TABLE_IMG.front + 1)
+                     : Math.min(p.y, TABLE_IMG.front - 1);
+  }
   const TB_EDGE = 18;                     // ふちから これだけは 離れて立つ
 
   function inTable(p){
@@ -1041,14 +1096,14 @@
     s.pos = vec2(s.gp.x, s.gp.y - hop + (sleeping ? FOOT_SLEEP : FOOT)*k);
     const sc = (sleeping ? SC_SLEEP : SC) * k;
     s.scale = vec2(sc*sx, sc*sy);   // 反転しない（左右は絵で分かれている）
-    s.z = s.gp.y;
+    s.z = depthOf(s.gp, BODY_HALF * k);
 
     // 影は床にはりついたまま。跳ぶほど小さく薄く
     const lift = 1 - Math.min(1, hop/(HOP+3))*0.34;
     s.shadow.pos = s.gp;
     s.shadow.scale = vec2(SHX*lift*k, SHY*lift*k);
     s.shadow.opacity = 0.28*lift;
-    s.shadow.z = s.gp.y - 1;
+    s.shadow.z = s.z - 1;
 
     const head = headOf(s) * (s.k || 1);
     // 部屋の 奥半分にいる子は 上が壁で空いている。手前の子は 下が空いている。
@@ -1443,7 +1498,7 @@
                                          : (PACK.headByCol[col] || PACK.head) * SC) * k;
     hatObj.pos = vec2(nushi.gp.x,
       nushi.gp.y - hTop - nushi.hop + HAT_SINK[kind] * w);
-    hatObj.z = nushi.gp.y + 0.5;
+    hatObj.z = depthOf(nushi.gp, BODY_HALF * k) + 0.5;
   });
   nushi.mode = "idle";
   nushi.target = floorPoint(nushi);

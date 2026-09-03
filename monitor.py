@@ -439,12 +439,19 @@ class Handler(BaseHTTPRequestHandler):
         from urllib.parse import urlparse, parse_qs
         return (parse_qs(urlparse(self.path).query).get("t") or [""])[0].strip()
 
+    def _note(self, how):
+        try:
+            self._log("%s  %s" % (how, self.path.split("?")[0]))
+        except Exception:
+            pass
+
     def _allowed(self):
         """ほかの機械から でも 見せていいか。
         だめな時は こちらで 返事まで して False を かえす"""
         if self._local():
             return True
         if not SHARE:
+            self._note("ことわった（スマホから見るが オフ）")
             self._send(403, json.dumps(
                 {"error": "closed",
                  "msg": "このPCの設定で「スマホから 見る」が 入っていません"},
@@ -452,10 +459,12 @@ class Handler(BaseHTTPRequestHandler):
             return False
         import hmac
         if not TOKEN or not hmac.compare_digest(self._key(), TOKEN):
+            self._note("ことわった（合言葉ちがい）")
             self._send(401, json.dumps(
                 {"error": "key", "msg": "合言葉が ちがいます。QRを 読みなおしてください"},
                 ensure_ascii=False))
             return False
+        self._note("見せた")
         return True
 
     def do_POST(self):

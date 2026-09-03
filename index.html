@@ -252,6 +252,10 @@
           ほかの人に 見られないよう 合言葉が つきます。
           QRを 読みとれば スマホに 自動で 入ります</p>
 
+        <button class="tog" id="qrBtn2" type="button" hidden>QRを 出す</button>
+        <p class="note" id="qrWhy2" hidden>スマホの ふつうのカメラで 読むと、
+          アプリが ひらいて 住所と 合言葉が 入ります</p>
+
         <div class="sec" id="showSec" hidden>スマホに 見せる もの</div>
         <div class="swatch" id="showRow" hidden></div>
         <p class="note" id="showWhy" hidden></p>
@@ -2062,8 +2066,7 @@
     showWhy.textContent = cur[2];
     Array.from(showRow.children).forEach((b, i)=>
       b.classList.toggle("on", SHOW_LEVELS[i][1] === showLv));
-    const btn = document.getElementById("phoneBtn");
-    if(btn) btn.hidden = !share;
+    if(window.paintQrBtn) window.paintQrBtn();
   }
 
   async function sendShare(ch){
@@ -2327,6 +2330,8 @@
   // ── スマホで開くための案内（PCで見ている時だけ出す）──
   (async ()=>{
     const btn  = document.getElementById("phoneBtn");
+    const btn2 = document.getElementById("qrBtn2");
+    const why2 = document.getElementById("qrWhy2");
     const wrap = document.getElementById("qrWrap");
     const onPC = ["127.0.0.1","localhost"].includes(location.hostname);
     if(!onPC) return;                       // すでにスマホ側で見ている
@@ -2339,11 +2344,34 @@
     const img = document.getElementById("qr");
     if(info.qr) img.src = "qr.svg"; else img.remove();
     // 「スマホから 見る」が 入っていない間は QRを 出さない
-    // （QRには 合言葉が 入っているし、出しても つながらない）
-    btn.hidden = !share;
-    btn.addEventListener("click", ()=> wrap.classList.add("open"));
-    document.getElementById("qrClose").addEventListener("click", ()=> wrap.classList.remove("open"));
-    wrap.addEventListener("click", (e)=>{ if(e.target === wrap) wrap.classList.remove("open"); });
+    // （QRには 合言葉が 入っているし、出しても つながらない）。
+    // 設定を もらう ところと どちらが 先か 決まらないので、
+    // ここで 自分が もらった 返事を つかう
+    btn.hidden = (info.share === false);
+
+    // QRも 窓ぜんたいに かぶせて 出すので、開いている間は
+    // 部屋の かたちの 切りぬきを いったん やめる
+    function openQr(){
+      sheetWrap.classList.remove("open");   // 設定は しまう
+      wrap.classList.add("open");
+      sheetShape(true);
+    }
+    function closeQr(){
+      wrap.classList.remove("open");
+      sheetShape(false);
+    }
+    btn.addEventListener("click", openQr);
+    btn2.addEventListener("click", openQr);
+    document.getElementById("qrClose").addEventListener("click", closeQr);
+    wrap.addEventListener("click", (e)=>{ if(e.target === wrap) closeQr(); });
+
+    // 設定の中の ぶんは、「スマホから 見る」を 入れた時だけ 出す
+    window.paintQrBtn = ()=>{
+      const on = !!share;
+      btn2.hidden = why2.hidden = !on;
+      btn.hidden = !on;
+    };
+    window.paintQrBtn();
   })();
 
   })();

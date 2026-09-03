@@ -95,6 +95,18 @@
     header h1{font-size:15px}
     .gear{width:36px;height:36px;font-size:17px}
   }
+  /* 設定だけの 窓。部屋も 一覧も 出さず、設定を いっぱいに ひろげる */
+  body.panel{background:#fdfaf2}
+  body.panel main, body.panel footer, body.panel header,
+  body.panel .wclose, body.panel .wgrip, body.panel .offline{display:none !important}
+  /* 設定だけを 板いっぱいに。QRは これまでどおり かぶせて 出す
+     （まとめて 指すと QRまで 下に ならんでしまう） */
+  body.panel #sheetWrap{position:static;display:block;background:none}
+  body.panel #sheetWrap .sheet{max-width:none;max-height:none;height:100vh;
+    border-radius:0;box-shadow:none;padding:16px 18px}
+  body.panel #sheetWrap .sheet h2 button{display:none}
+  body.panel .cfgBody ul{max-height:38vh}
+
   /* ウィジェット姿。デスクトップに置く時は 部屋だけを出す */
   body.widget{background:transparent}
   body.widget footer{display:none}
@@ -322,6 +334,9 @@
   const RW=1774, RH=887;
   // デスクトップに 置く 姿かどうか。あちこちで 見るので 先に 決めておく
   const WIDGET = /[?&]widget/.test(location.search);
+  // 設定だけの 窓。デスクトップ版は 窓が 小さいので、
+  // 設定は こちらの 縦長の窓に 出す
+  const PANEL = /[?&]panel/.test(location.search);
 
   const k = kaplay({
     canvas: document.getElementById("game"),
@@ -1960,7 +1975,13 @@
   function openSheet(){ renderPicker(); sheetWrap.classList.add("open"); sheetShape(true); }
   function closeSheet(){ sheetWrap.classList.remove("open"); sheetShape(false); }
 
-  document.getElementById("pickBtn").addEventListener("click", openSheet);
+  document.getElementById("pickBtn").addEventListener("click", ()=>{
+    // デスクトップ版は 窓が 小さいので、設定は べつの窓で
+    if(WIDGET && window.pywebview && window.pywebview.api.settings){
+      try{ window.pywebview.api.settings(); return; }catch(e){}
+    }
+    openSheet();
+  });
   document.getElementById("sheetClose").addEventListener("click", closeSheet);
   sheetWrap.addEventListener("click", (e)=>{ if(e.target === sheetWrap) closeSheet(); });
   // ウィジェット姿では 窓の どこを つかんでも 窓が動いてしまうので、
@@ -2259,8 +2280,30 @@
   poll();
   setInterval(poll, 2500);
 
+  // 設定は べつの窓でも いじれる。同じ 置き場を 見ているので、
+  // 変わっていないか ときどき 見にいって、部屋に うつす
+  function reloadCfg(){
+    let d = null;
+    try{ d = JSON.parse(localStorage.getItem(CFG_STORE) || "{}"); }catch(e){ return; }
+    let moved = false;
+    for(const k in CFG_DEF){
+      const v = (d && d[k] !== undefined) ? d[k] : CFG_DEF[k];
+      if(cfg[k] !== v){ cfg[k] = v; moved = true; }
+    }
+    if(!moved) return;
+    applyNushi(); applyBg(); applyDaylight();
+    renderTodo(lastRaw ? lastRaw.todo : null);
+  }
+  window.addEventListener("storage", reloadCfg);
+  setInterval(reloadCfg, 1200);
+
   // ── ウィジェット姿かどうか ──
   // デスクトップに置く時は 見出しも一覧も出さず、部屋だけを 背景ぬきで見せる
+  if(PANEL){
+    document.body.classList.add("panel");
+    sheetWrap.classList.add("open");
+    renderPicker();
+  }
   if(WIDGET){
     document.body.classList.add("widget");
     window.addEventListener("resize", ()=>{ tellChrome.last = null; tellChrome(); });

@@ -44,6 +44,7 @@ import monitor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 URL = f"http://127.0.0.1:{monitor.PORT}/?widget=1"
+URL_PANEL = f"http://127.0.0.1:{monitor.PORT}/?panel=1"
 STATE = os.path.join(HERE, "_widget.json")
 ROOM_PNG = os.path.join(HERE, "room_cut.png")
 LOCK_PORT = 8898        # 二重に 開かないための 見はり口（8899 は 工房の 番号）
@@ -62,6 +63,7 @@ _spans = None       # 部屋の絵の 行ごとの「左端〜右端」
 _room_wh = (1774, 887)
 _chrome = [[]]      # 部屋の外に 残しておく ぶん（窓に対する 割合で）
 _grab = [False]     # すみを つかんでいる さいちゅうか
+_panel = [None]     # 設定の窓（開いていれば その窓）
 _full = [False]     # 切りぬきを いったん やめているか（設定を 開いている間）
 
 
@@ -247,6 +249,36 @@ class Api:
             return False
         apply_region(hwnd, r[2], r[3])
         return True
+
+    def settings(self):
+        """設定は べつの窓で 開く。
+
+        工房の窓は 小さいので、その中に 押しこむと
+        ほとんど 見えないまま 上下に 送ることに なる。
+        ふつうの 縦長の窓に 出したほうが ずっと 読みやすい
+        """
+        w = _panel[0]
+        if w is not None:
+            try:
+                w.show()
+                return True
+            except Exception:
+                _panel[0] = None
+        try:
+            p = webview.create_window(
+                "スライムこうぼう の せってい", URL_PANEL,
+                width=470, height=820, resizable=True, on_top=True,
+            )
+            _panel[0] = p
+
+            def gone():
+                _panel[0] = None
+
+            p.events.closed += gone
+            return True
+        except Exception:
+            _panel[0] = None
+            return False
 
     def chrome(self, rects):
         """部屋の外に ある 目じるしの 場所（窓に対する 割合）。

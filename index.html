@@ -1326,6 +1326,8 @@
   // 仕事中の子 … 手もとの話が多め、たまに時間の話
   function jobLine(s){
     if(rand() < 0.14) return clockLine();
+    const mine = selfLines(s);
+    if(mine.length && rand() < 0.22) return pick(mine);
     return pick((TALK[s.job] || []).concat(TALK_ANY, timeLines()));
   }
   // ぬしは トバ本人。ひとりごとも 本人の口ぶりで
@@ -1364,10 +1366,79 @@
   ];
   const TOBA_CALL = ['ねえ トバ','トバ','あのね トバ'];
 
+  // ── トバの ひとこと ──
+  // ぬしは 部屋ぜんたいの ようすが 見えている。
+  // 決まり文句だけでなく、いま 目の前で 起きている ことを 言う
+  function tobaLine(){
+    const list = (lastList || []).filter(x => !x.leaving);
+    const n = list.length;
+    const busy  = list.filter(x => x.busy);
+    const perm  = list.filter(x => x.waiting === "permission");
+    const reply = list.filter(x => x.waiting === "reply");
+    const weak  = list.filter(x => x.tired);
+    const long  = list.slice().sort((a, b) => (b.elapsed || 0) - (a.elapsed || 0))[0];
+    const h = nowHM()[0];
+    const c = [];
+
+    // 手が 止まっている子が いる … いちばん 先に 言う
+    if(perm.length === 1) c.push(perm[0].tag + " が 手を 止めてる", perm[0].tag + " に 返事を してやってくれ");
+    if(perm.length > 1)   c.push(perm.length + "ひき 止まってる", "止まってるのが " + perm.length + "ひきだ");
+
+    // 返事まち
+    if(reply.length === 1) c.push(reply[0].tag + " が {you}を まってる");
+    if(reply.length > 1)   c.push(reply.length + "ひき、{you}の 番だ");
+
+    // のびすぎた部屋
+    if(weak.length) c.push(weak[0].tag + " は 長くなりすぎた", weak[0].tag + " は そろそろ 新しい部屋だな");
+
+    // 部屋ぜんたいの ようす
+    if(n === 0) c.push("きょうは しずかだな", "だれも いないな");
+    else if(n === 1) c.push("きょうは " + list[0].tag + " だけか", "ひとりでも まわってる");
+    else if(n >= 6) c.push(n + "ひきか。にぎやかだな", "よく これだけ まわるな");
+    if(n > 1 && busy.length === n) c.push("みんな 動いてるな", "全員 しごと中だ");
+    if(n > 1 && busy.length === 0) c.push("いまは みんな 手が あいてる", "ひと段落 したところか");
+    if(busy.length === 1 && n > 1) c.push(busy[0].tag + " だけ 動いてるな");
+
+    // いちばん 長く いる子
+    if(long && long.elapsed > 3 * 3600)
+      c.push(long.tag + " は もう " + Math.floor(long.elapsed / 3600) + "時間 うごいてる");
+
+    // 時間と あわせて
+    if(h >= 0 && h < 5 && busy.length) c.push("こんな 時間まで よく やる", "夜ふけだぞ");
+    if(h >= 6 && h < 10) c.push("きょうも 始まったな");
+    if(h >= 22 && busy.length) c.push("今日は よく 動いた日だな");
+
+    // 見どころが 何も 無い時は、いつもの 口ぶりで
+    if(!c.length) return pick(TALK_TOBA);
+    // 半分は 見たままを、半分は いつもの口ぶりを
+    return rand() < 0.7 ? pick(c) : pick(TALK_TOBA);
+  }
+
+  // ── 住人の ひとりごと ──
+  // 自分の セッションが いま どうなっているかを ときどき 口にする
+  function selfLines(s){
+    const q = (s && s.sess) || {};
+    const c = [];
+    const el = q.elapsed || 0, wt = q.waited || 0;
+    // 立ちあがったばかり。ただし 前の つづきの部屋は のぞく
+    if(el > 0 && el < 150 && (q.msgs || 0) < 60) c.push("はじまったばかり", "よろしくね", "さあ やるぞ");
+    if(el > 4 * 3600) c.push("けさから ずっと いる", "ながい 一日だね",
+                             "もう " + Math.floor(el / 3600) + "時間 いる");
+    if(q.waiting === "permission") c.push("ここから 先は {you}の ばん", "きいてから すすむね");
+    if(q.waiting === "reply" && wt > 900) c.push("{you}、まだかな", "いつでも いいよ", "ここで まってる");
+    if(q.tired) c.push("この部屋、ながく なったなあ");
+    if((q.msgs || 0) > 600) c.push("たくさん はなしたね", "いっぱい しゃべった");
+    if(q.tag) c.push("きょうは " + q.tag + "の日", q.tag + "の しごと、すきだよ");
+    if(q.job) c.push(q.job + "、たのしい", "いま " + q.job + " してる");
+    return c;
+  }
+
   // 手あきの子 … ひまなので、外の景色や時間の話をよくする
   function freeLine(s){
-    if(s && s.isNushi) return pick(TALK_TOBA);
-    if(rand() < 0.22) return clockLine();
+    if(s && s.isNushi) return tobaLine();
+    const mine = selfLines(s);
+    if(mine.length && rand() < 0.35) return pick(mine);
+    if(rand() < 0.20) return clockLine();
     const t = timeLines();
     return pick(TALK_FREE.concat(TALK_ANY, t, t));
   }
@@ -2062,6 +2133,7 @@
       if(!s.done){ s.done = true; finishJob(s); }
       sess = Object.assign({}, sess, { job: null, waiting: null, busy: false });
     }else s.done = false;
+    s.sess = sess;                 // ひとりごとで その子の ようすに ふれるため
     s.waiting = sess.waiting || null;
     setTag(s, sess.tag, s.waiting);
     if(sess.tired) weaken(s); else unweaken(s);

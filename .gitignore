@@ -1,8 +1,11 @@
+_screenshots/
 __pycache__/
 *.pyc
-_access.log
-*.apk
+slime_test/
+_tmp_*
 _state.json
 _kinds.log
 _config.json
 _widget.json
+_access.log
+*.apk

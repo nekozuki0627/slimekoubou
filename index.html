@@ -428,6 +428,10 @@
   loadSprite("table", "table.png");
   loadSprite("slime", PACK.sheet,
     { sliceX: PACK.grid.x, sliceY: PACK.grid.y, anims: PACK.anims });
+  // よわった子（会話が のびすぎた部屋）。4コマの ゆっくりした 息づかいだけ
+  loadSprite("weak", "sheet_weak.png",
+    { sliceX: 4, sliceY: 1,
+      anims: { rest: { from:0, to:3, loop:true, speed:1.1 } } });
   loadSprite("sleeper", PACK.sleepSheet,
     { sliceX: PACK.sleepGrid.x, sliceY: PACK.sleepGrid.y,
       anims: { rest: { from:0, to:PACK.sleepGrid.x-1, loop:true, speed:1.4 } } });
@@ -1338,6 +1342,17 @@
     const t = timeLines();
     return pick(TALK_FREE.concat(TALK_ANY, t, t));
   }
+  // よわった子 … 新しい部屋に うつしてほしい
+  const TALK_WEAK = [
+    'この部屋、もう おもたい…',
+    'あたらしい 部屋に うつして…',
+    'ことばが つまってきた…',
+    'そろそろ 引っこしどき かも',
+    'ここまでの 話は 書きとめてある よ',
+    'つづきは 新しい部屋で できる',
+  ];
+  function weakLine(){ return pick(TALK_WEAK); }
+
   // 寝ている子 … ねごと。たまに寝ぼけて時計を言う
   function sleepLine(){
     if(rand() < 0.12) return clockLine() + '…';
@@ -1363,6 +1378,16 @@
             if(puff.opacity<=0) destroy(puff); });
         }
         tickTalk(s, sleepLine, 14, 30);
+        stepBody(s);
+        return;
+      }
+
+      // ── よわっている ──
+      // 歩きまわる 元気は ない。その場で ぐったりして、たまに こぼす
+      if(s.weak){
+        if(s.curAnim() !== "rest") s.play("rest");
+        s.mode = "idle";
+        tickTalk(s, weakLine, 12, 26);
         stepBody(s);
         return;
       }
@@ -1501,9 +1526,28 @@
     s.say = 2.2;
     s.cheerFor = 1.6;
     setBubble(s, "おわったよ！", rgb(62,180,137));
-    s.play("cheer");
+    if(!s.weak) s.play("cheer");
     sparkle(s);
     s.rest = 0;
+    s.target = floorPoint(s);
+  }
+
+  // ── よわる / もどる ──
+  // 会話が のびすぎて、返事が 返らなくなる 手前。
+  // 「この部屋は おしまいにして、新しい部屋を 作って」の しるし
+  function weaken(s){
+    if(s.weak || s.dying) return;
+    s.weak = true;
+    s.mode = "idle";
+    s.face = null;
+    s.cheerFor = 0;
+    swapSprite(s, "weak", "rest");
+    setBubble(s, "");
+  }
+  function unweaken(s){
+    if(!s.weak) return;
+    s.weak = false;
+    swapSprite(s, "slime", "idle");
     s.target = floorPoint(s);
   }
 
@@ -1521,7 +1565,7 @@
   function wakeUp(s){
     if(s.mode !== "sleep") return;
     s.mode = "idle";
-    swapSprite(s, "slime", "cheer");   // んーっ と のびをする
+    swapSprite(s, s.weak ? "weak" : "slime", s.weak ? "rest" : "cheer");
     setBubble(s, "");
     s.say = 0;
     const h = nowHM()[0];
@@ -1871,6 +1915,7 @@
     }else s.done = false;
     s.waiting = sess.waiting || null;
     setTag(s, sess.tag, s.waiting);
+    if(sess.tired) weaken(s); else unweaken(s);
 
     // 仕事の出入り
     if(sess.job && !s.job){
@@ -2186,7 +2231,9 @@
       const box = document.createElement("input");
       box.type = "checkbox"; box.checked = on;
       const nm = document.createElement("span");
-      nm.className = "nm"; nm.textContent = sess.name;
+      nm.className = "nm";
+      // よわった子は 一覧でも 分かるように（＝新しい部屋に うつす合図）
+      nm.textContent = sess.name + (sess.tired ? "　… よわってる" : "");
       const st = document.createElement("span");
       const w = sess.waiting;
       st.className = "st" + (w === "permission" ? " urg" : w === "reply" ? " wait"

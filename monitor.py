@@ -34,8 +34,24 @@ BUSY_HOLD = 4.0
 ENDED_HOLD = 6 * 60 * 60
 # 何の合図も来ないまま この時間が過ぎたセッションは、閉じたものとみなす
 SESSION_GONE = 2 * 60 * 60
+# 部屋から いなくなったと 分かった子を、見おくる 時間。
+# ふつうに おわった子（ENDED_HOLD）より 早く 帰す
+LEFT_HOLD = 10 * 60
+# 生まれたばかりの子を まちがえて 帰さないための ゆうよ
+BORN_GRACE = 90
 # ひとことを出しておく時間
 SAY_HOLD = 25.0
+
+# ── 会話の 重さ ──
+# 会話が のびるほど 返事は おそくなり、しまいには 返らなくなる。
+# 実際に 返らなくなった 部屋を 数えると 4,304会話 / 65MB だった。
+# 手おくれに なる前に 気づけるよう、その 手前を 上限に する。
+# 会話の数と 大きさの どちらか 重い方で 見る
+#（絵や 長い道具の返事が 多いと、会話が 少なくても 重くなるため）
+# いちばん 早く 返らなくなった 部屋は 1,933会話 だった。
+# その 手前で 知らせたいので、1,500会話 を 上限に する
+WEIGHT_MSGS = 1500
+WEIGHT_BYTES = 52 * 1024 * 1024
 # 名札に出す 呼び名の長さの上限
 TAG_MAX = 8
 
@@ -185,6 +201,83 @@ def read_transcript(path):
     return title, say
 
 
+_weigh = {}          # 会話の 置き場 → 数えた ところまでの 記録
+
+
+def weigh(path):
+    """
+    その会話の 重さ。0.0=かるい / 1.0=もう あぶない
+    まるごと 数えなおすと 重いので、前より のびた ぶんだけ 足す
+    """
+    if not path:
+        return None
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return (_weigh.get(path) or {}).get("out")
+    c = _weigh.get(path)
+    msgs, at = 0, 0
+    if c and c["at"] <= size:
+        msgs, at = c["msgs"], c["at"]     # つづきから
+    try:
+        with open(path, "rb") as f:
+            f.seek(at)
+            buf = b""
+            while True:
+                chunk = f.read(1 << 22)
+                if not chunk:
+                    break
+                buf += chunk
+                cut = buf.rfind(b"\n")
+                if cut < 0:
+                    continue              # まだ 行の おわりが 来ていない
+                part, buf = buf[:cut + 1], buf[cut + 1:]
+                msgs += (part.count(b'"type":"user"')
+                         + part.count(b'"type":"assistant"'))
+                at += len(part)
+    except Exception:
+        pass
+    w = max(msgs / float(WEIGHT_MSGS), size / float(WEIGHT_BYTES))
+    # ようすは 2つだけ。げんき か、よわり（＝新しい部屋に うつる合図）か
+    out = {"msgs": msgs, "mb": round(size / 1048576.0, 1),
+           "weight": round(min(w, 3.0), 2),
+           "tired": 1 if w >= 1.0 else 0}
+    _weigh[path] = {"at": at, "msgs": msgs, "out": out}
+    return out
+
+
+def weak_note(sid):
+    """
+    よわった部屋の トバに 渡す 耳うち。
+    元気なうちは 何も 渡さない（ことばが 増えると それ自体が 部屋を 太らせる）
+    """
+    if not sid:
+        return None
+    with _lock:
+        s = _sessions.get(sid)
+        path = (s or {}).get("transcript")
+    h = weigh(path)
+    if not h or not h.get("tired"):
+        return None
+    # 呼び名は この工房の せってい（つかい手が 入れたもの）を 使う。
+    # 決めうちに すると、ほかの人の 工房で 知らない名まえが 出てしまう
+    who = USER_NAME or "つかい手"
+    return (
+        "[この部屋の おもさ] 会話%d件 / %.1fMB ／ もう おもい（目安の%.0f%%）。"
+        "この部屋は そのうち 返事が 返らなくなる。"
+        "いま 手をつけている ことが 一区切りついたら、"
+        "『この部屋、そろそろ 新しくしよう』と %sに 一言 出すこと。"
+        "同意が とれたら、"
+        "(1)これまでの 経緯・判断・やり残しを 省かずに 書き出す "
+        "(2)spawn_task で チップを 出す"
+        "（title＝いまと 同じ セッション名／prompt＝その 書き出し 全文）"
+        "(3)新しい部屋が 立ったのを 見てから archive_session(\"self\") で"
+        " この部屋を 閉じる。"
+        "作業の 途中では 言わない。急かさない。1回 言って 断られたら もう 言わない。"
+        % (h["msgs"], h["mb"], h["weight"] * 100, who)
+    )
+
+
 # ─────────────────────────────────────────────
 # セッションの様子
 # ─────────────────────────────────────────────
@@ -261,6 +354,8 @@ def load_state():
     for sid, s in (d.get("sessions") or {}).items():
         if now - s.get("last", 0) > SESSION_GONE:
             continue
+        if s.get("left"):
+            continue           # もう 帰った子は 呼びもどさない
         s["busy"] = 0
         s["job"] = None
         s["job_until"] = 0.0
@@ -280,6 +375,7 @@ def on_hook(event, payload):
     with _lock:
         s = _touch(sid, payload)
         # 何か 合図が 来たなら まだ 生きている
+        s["left"] = False
         if event not in ("end",):
             s["ended"] = None
         if event == "start":
@@ -332,8 +428,22 @@ def snapshot():
     with _lock:
         for sid in list(_sessions.keys()):
             s = _sessions[sid]
+            # ── もう ひらいていない セッションは 帰す ──
+            # 閉じた／かたづけた（アーカイブ）セッションは おきばから 消えるので、
+            # 待たずに その場で 分かる
+            if (_LIVE is not None and sid not in _LIVE
+                    and now - s.get("started", now) > BORN_GRACE):
+                if not s.get("left"):
+                    s["left"] = True
+                    if s.get("ended") is None:
+                        s["ended"] = now
+                # 名まえも つかないまま 消えた子は、見おくらずに その場で 帰す
+                if not s.get("title"):
+                    del _sessions[sid]
+                    continue
             if s["ended"] is not None:
-                if now - s["ended"] > ENDED_HOLD:
+                hold = LEFT_HOLD if s.get("left") else ENDED_HOLD
+                if now - s["ended"] > hold:
                     del _sessions[sid]
                     continue
             elif now - s.get("last", 0) > SESSION_GONE:
@@ -347,6 +457,7 @@ def snapshot():
                 s["say"] = say
                 s["say_at"] = now
 
+            heavy = weigh(s.get("transcript")) or {}
             job = s["job"] if now < s["job_until"] else (s["job"] if s["busy"] else None)
             folder = os.path.basename((s.get("cwd") or "").rstrip("\\/")) or ""
             name = s.get("title") or folder or "むめい"
@@ -365,6 +476,11 @@ def snapshot():
                 "waited": int(max(0, now - s["waiting_at"])) if s["waiting"] else 0,
                 "leaving": s["ended"] is not None,
                 "elapsed": int(max(0, now - s["started"])),
+                # 会話の 重さ。のびすぎた子は よわった すがたに なる。
+                # 「この部屋は もう おしまいにして、新しい部屋を 作って」の しるし
+                "tired": heavy.get("tired", 0),
+                "weight": heavy.get("weight", 0),
+                "msgs": heavy.get("msgs", 0),
                 "idle": int(max(0, now - s.get("last", now))),   # 最後に動いてからの秒数
             })
     # 「さっき動いたもの」が先に来るように並べる。
@@ -512,6 +628,25 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             payload = {}
         event = (parse_qs(u.query).get("e") or [""])[0]
+        # ── よわった部屋には、その子自身に そっと 知らせる ──
+        # 「ask」は 耳うちを 聞きに来るだけ。スライムの ようすは 変えない。
+        # 返した ことばは、その部屋の トバへの 耳うちに なる
+        #（Claude の additionalContext）
+        if event == "ask":
+            try:
+                note = weak_note(payload.get("session_id"))
+                if note:
+                    return self._send(200, json.dumps(
+                        {"hookSpecificOutput": {
+                            "hookEventName": "UserPromptSubmit",
+                            "additionalContext": note}}, ensure_ascii=False))
+                # 元気なうちは 何も 言わない。
+                # 中身のない 返事を 出すと、それが そのまま
+                # 耳うちとして 毎回 入ってしまう
+                return self._send(200, "")
+            except Exception:
+                pass
+            return self._send(200, "")
         try:
             on_hook(event, payload)
         except Exception:
@@ -520,7 +655,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         import mimetypes
-        from urllib.parse import unquote
+        from urllib.parse import unquote, urlparse
         path = unquote(self.path.split("?")[0])
         if path in ("/", "/index.html"):
             # 画面そのものは だれが 見ても かまわない（中身は 入っていない）。
@@ -545,6 +680,15 @@ class Handler(BaseHTTPRequestHandler):
                 out["share"] = SHARE
                 out["show"] = SHOW
             return self._send(200, json.dumps(out, ensure_ascii=False))
+        if path == "/pair":
+            from urllib.parse import parse_qs as _pq2
+            q2 = _pq2(urlparse(self.path).query)
+            host = (q2.get("host") or [""])[0]
+            key = (q2.get("key") or [""])[0]
+            if not host or not key:
+                return self._send(400, "つなぎ先が 足りません",
+                                  "text/plain; charset=utf-8")
+            return self._send(200, pair_page(host, key), "text/html; charset=utf-8")
         if path == "/qr_pair.svg":
             if not self._local():
                 return self._send(403, "local only", "text/plain; charset=utf-8")
@@ -608,6 +752,11 @@ def lan_ip():
 _BRIDGE = {}
 _BRIDGE_AT = 0.0
 _KIND = {}          # sessionId → (kind, entrypoint)
+# いま ほんとうに ひらいている セッションの id。
+# ~/.claude/sessions/<pid>.json は セッションが 閉じると 消えるので、
+# ここに 無い＝もう いない、と 見わけられる。
+# 読めなかった時は None（＝分からない。何も 帰さない）
+_LIVE = None
 
 
 def bridge_ids():
@@ -617,12 +766,13 @@ def bridge_ids():
       bridgeSessionId … スマホの Claude が 使う id
     が 並んでいる。その対応を ひろって おく
     """
-    global _BRIDGE, _BRIDGE_AT
+    global _BRIDGE, _BRIDGE_AT, _LIVE
     now = time.time()
     if now - _BRIDGE_AT < 10.0:
         return _BRIDGE
     _BRIDGE_AT = now
     out = {}
+    live = set()
     d = os.path.join(os.path.expanduser("~"), ".claude", "sessions")
     try:
         for name in os.listdir(d):
@@ -636,13 +786,16 @@ def bridge_ids():
             sid = j.get("sessionId")
             if not sid:
                 continue
+            live.add(sid)
             if j.get("bridgeSessionId"):
                 out[sid] = j["bridgeSessionId"]
             # その セッションの 素性。自動で 立ったものを 名まえに たよらず
             # 見わけるための 手がかり
             _KIND[sid] = (j.get("kind"), j.get("entrypoint"))
     except Exception:
-        pass
+        live = None            # おきばが 読めない。決めつけない
+    # からっぽの時も 決めつけない（読めているのに 0件、は ふつう ありえない）
+    _LIVE = live if live else None
     _BRIDGE = out
     return out
 
@@ -1054,9 +1207,63 @@ def pair_url():
     スマホの ふつうのカメラで 読みとると、そのまま アプリが ひらいて
     住所が 入る。アプリに カメラを つけなくて すむ
     """
-    return ("slimekoubou://pair?host="
-            + urllib.parse.quote("http://%s:%d" % (phone_ip(), PORT), safe="")
-            + "&key=" + urllib.parse.quote(TOKEN, safe=""))
+    # QRには ふつうの リンク（http）を 入れる。
+    # 「slimekoubou://」のような 独自の 合図を そのまま 入れると、
+    # Googleレンズなど 読み取りアプリの 多くが 開けない。
+    # いったん この工房の /pair を ひらいて、そこから アプリへ 渡す
+    return "http://%s:%d/pair?host=%s&key=%s" % (
+        phone_ip(), PORT,
+        urllib.parse.quote("http://%s:%d" % (phone_ip(), PORT), safe=""),
+        urllib.parse.quote(TOKEN, safe=""))
+
+
+def app_url(host, key):
+    """アプリを ひらく ための 合図"""
+    return ("slimekoubou://pair?host=" + urllib.parse.quote(host, safe="")
+            + "&key=" + urllib.parse.quote(key, safe=""))
+
+
+PAIR_PAGE = """<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>スライムこうぼう に つなぐ</title>
+<style>
+ body{margin:0;padding:28px 20px;background:#e7dcc8;color:#3d4954;
+   font:16px/1.7 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif}
+ .box{max-width:420px;margin:0 auto;background:#fdfaf2;border-radius:18px;padding:22px}
+ h1{font-size:19px;margin:0 0 6px}
+ p{margin:0 0 14px;color:#6d7883;font-size:14px}
+ a.go{display:block;text-align:center;background:#3eb489;color:#fff;text-decoration:none;
+   font-size:17px;font-weight:600;border-radius:12px;padding:15px}
+ .hand{margin-top:22px;border-top:1px solid #eee6d8;padding-top:16px}
+ code{display:block;background:#f3efe4;border-radius:9px;padding:9px 11px;
+   font-size:13px;word-break:break-all;margin:5px 0 12px;color:#3d4954}
+ .lbl{font-size:12px;color:#8d97a1}
+</style>
+<div class="box">
+ <h1>スライムこうぼう に つなぐ</h1>
+ <p>下の ボタンを おすと、かべがみアプリが ひらいて
+    住所と 合言葉が 入ります。</p>
+ <a class="go" id="go" href="%(app)s">アプリを ひらく</a>
+ <div class="hand">
+  <p style="margin-bottom:8px">ひらかない時は、アプリの 設定に これを 入れてね</p>
+  <div class="lbl">住所</div><code>%(host)s</code>
+  <div class="lbl">合言葉</div><code>%(key)s</code>
+ </div>
+</div>
+<script>
+ // ひらいた とたんに アプリへ。だめでも 上の ボタンが のこる
+ setTimeout(function(){ location.href = document.getElementById("go").href; }, 350);
+</script>
+"""
+
+
+def pair_page(host, key):
+    import html
+    return PAIR_PAGE % {
+        "app": html.escape(app_url(host, key), quote=True),
+        "host": html.escape(host),
+        "key": html.escape(key),
+    }
 
 
 def qr_svg(url=None):

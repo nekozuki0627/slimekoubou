@@ -1,5 +1,24 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 14,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/start.sh\" 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=start\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
@@ -9,6 +28,16 @@
             "async": true,
             "timeout": 3,
             "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=prompt\" >/dev/null 2>&1 || true"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=ask\" 2>/dev/null || true"
           }
         ]
       }
@@ -52,56 +81,6 @@
         ]
       }
     ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "shell": "bash",
-            "async": true,
-            "timeout": 3,
-            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=stop\" >/dev/null 2>&1 || true"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "shell": "bash",
-            "async": true,
-            "timeout": 3,
-            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=start\" >/dev/null 2>&1 || true"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "shell": "bash",
-            "async": true,
-            "timeout": 5,
-            "command": "S=$(ls -t \"$APPDATA\"/Claude/claude-code-sessions/*/*/scheduled-tasks.json 2>/dev/null | head -1); [ -n \"$S\" ] && cp \"$S\" \"$HOME/.claude/scheduled-tasks/_mirror.json\"; true"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "shell": "bash",
-            "async": true,
-            "timeout": 3,
-            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=end\" >/dev/null 2>&1 || true"
-          }
-        ]
-      }
-    ],
     "PermissionRequest": [
       {
         "hooks": [
@@ -124,6 +103,32 @@
             "async": true,
             "timeout": 3,
             "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=notify\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=stop\" >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "async": true,
+            "timeout": 3,
+            "command": "curl -s -m 2 -X POST --data-binary @- \"http://127.0.0.1:8899/api/hook?e=end\" >/dev/null 2>&1 || true"
           }
         ]
       }

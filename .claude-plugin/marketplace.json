@@ -1,0 +1,14 @@
+{
+  "name": "arillo",
+  "owner": {
+    "name": "Arillo Design"
+  },
+  "description": "Arillo Design が作る、Claude Code のようすを見て楽しむ道具。",
+  "plugins": [
+    {
+      "name": "slime-koubou",
+      "source": ".",
+      "description": "Claude Code の裏側で今なにが起きているかを、スライムが働く姿で見せます。セッション1つがスライム1ぴき。許可を待って止まっている子は赤い名札で机の前にならび、会話がのびすぎた部屋の子はぐったりして引っこしをすすめてきます。スマホの壁紙としても見られます。"
+    }
+  ]
+}

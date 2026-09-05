@@ -1,0 +1,7 @@
+# シェルの スクリプトは どの機械でも 動くよう 改行を LF に そろえる
+# （Windows の 改行が 混ざると Mac や Linux で 動かなくなる）
+*.sh text eol=lf
+
+# 絵や APK は そのまま
+*.png binary
+*.apk binary

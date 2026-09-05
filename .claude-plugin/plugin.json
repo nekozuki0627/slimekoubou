@@ -1,0 +1,16 @@
+{
+  "name": "slime-koubou",
+  "description": "Claude Code の裏側で今なにが起きているかを、スライムが働く姿で見せます。ツールを使うたびにスライムが仕事を引きうけ、終わると喜び、手が空くとおしゃべりして、静かになると寝ます。会話がのびすぎた部屋の子はぐったりして、引っこしをすすめてきます。",
+  "version": "0.2.0",
+  "author": {
+    "name": "YUMA (Arillo Design)"
+  },
+  "keywords": [
+    "visualization",
+    "hooks",
+    "monitor",
+    "fun",
+    "ambient",
+    "sessions"
+  ]
+}

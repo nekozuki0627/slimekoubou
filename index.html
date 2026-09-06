@@ -81,6 +81,17 @@
     border-radius:50%;background:#e6d6ef;color:#5c2f70;font-size:12px;line-height:1;padding:0}
   .legend.todo .done:hover{background:#d7bfe6}
   /* 見出し。ふだんは これだけ 出して、押すと 中身が ひらく */
+  /* はじめて ひらいた時に 名まえを たずねる 札 */
+  .askname{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:60;
+    background:rgba(255,253,247,.97);border:1px solid #ddd0bb;border-radius:14px;
+    padding:14px 18px;box-shadow:0 6px 22px rgba(60,45,25,.18);text-align:center;
+    font-size:13px;color:#5b5147;max-width:min(92vw,420px)}
+  .askname p{margin:0 0 10px}
+  .askname input{font-size:14px;padding:7px 10px;border:1px solid #d5c8b4;
+    border-radius:8px;width:150px;text-align:center}
+  .askname button{margin-left:6px;font-size:13px;padding:7px 13px;border:0;
+    border-radius:8px;cursor:pointer;background:#8DBA63;color:#fff}
+  .askname button.sub{background:#e8e2d8;color:#6b6153}
   .legend.todo .row.head{cursor:pointer;user-select:none}
   .legend.todo .row.head:hover{background:rgba(246,236,252,.98)}
   .legend.todo .head .mark{flex:none;color:#8a3ea8;font-size:11px;width:12px;
@@ -225,6 +236,12 @@
     <div class="status" id="status"><span class="dot" id="dot"></span><span id="statusTxt">よみこみちゅう…</span></div>
     <button class="gear" id="pickBtn" aria-label="セッションのせってい">⚙<b id="hiddenNote"></b></button>
   </header>
+  <div class="askname" id="askName" hidden>
+    <p>この部屋の <b>ぬし</b> は、あなたの AI です。<br>名まえを おしえて ください</p>
+    <input id="askNameIn" placeholder="れい：クロード" maxlength="8">
+    <button id="askNameOk">きめる</button>
+    <button class="sub" id="askNameSkip">あとで</button>
+  </div>
   <button class="wclose" id="wclose" aria-label="とじる">×</button>
   <div class="wgrip" id="wgrip" title="ひっぱって まどの 大きさを 変える"></div>
   <main><canvas id="game"></canvas></main>
@@ -490,11 +507,41 @@
   const DODGE_NAMES = ["とても ゆっくり","ゆっくり","ふつう","はやい","とても はやい"];
   const BG_COLORS = ["#E7DCC8","#F7F5F0","#DFE4E8","#DCE9F2",
                      "#E9E2F2","#3A4450","#20262E","#0E1013"];
-  const CFG_DEF = { bg:0, daylight:true, showTodo:true, you:"", nushiName:"トバ",
+  // ぬしは その人の AI。名まえは 決めうちに せず、はじめに たずねる
+  const CFG_DEF = { bg:0, daylight:true, showTodo:true, you:"", nushiName:"",
                     nushiSize:68, nushiHue:0, nushiHat:1, chat:2, dodge:2 };
   const YOU_DEF = "あるじ";      // 決めていない時の 呼び名
+  const NUSHI_DEF = "ぬし";      // 名まえを まだ 聞いていない時の 呼び名
   const cfg = Object.assign({}, CFG_DEF);
-  try{ Object.assign(cfg, JSON.parse(localStorage.getItem(CFG_STORE) || "{}")); }catch(e){}
+  let cfgIsNew = true;
+  try{
+    const raw = localStorage.getItem(CFG_STORE);
+    cfgIsNew = !raw;
+    Object.assign(cfg, JSON.parse(raw || "{}"));
+    // 前の ばんから 使っている人は、これまでどおり「トバ」のままに する
+    if(raw && !("nushiName" in JSON.parse(raw))) cfg.nushiName = "トバ";
+  }catch(e){}
+  function nushiName(){ return (cfg.nushiName || "").trim() || NUSHI_DEF; }
+
+  // はじめて ひらいた時だけ たずねる。「あとで」を おしたら もう 出さない
+  window.addEventListener("DOMContentLoaded", ()=>{
+    const box = document.getElementById("askName");
+    if(!box) return;
+    if((cfg.nushiName || "").trim() || cfg.nushiAsked) return;
+    box.hidden = false;
+    const inp = document.getElementById("askNameIn");
+    const done = (name)=>{
+      if(name) cfg.nushiName = name.trim().slice(0, 8);
+      cfg.nushiAsked = true; saveCfg();
+      box.hidden = true;
+      const f = document.getElementById("nuName");
+      if(f) f.value = cfg.nushiName || "";
+    };
+    document.getElementById("askNameOk").onclick = ()=> done(inp.value);
+    document.getElementById("askNameSkip").onclick = ()=> done("");
+    inp.addEventListener("keydown", e=>{ if(e.key === "Enter") done(inp.value); });
+    setTimeout(()=> inp.focus(), 400);
+  });
   function saveCfg(){
     try{ localStorage.setItem(CFG_STORE, JSON.stringify(cfg)); }catch(e){}
   }
@@ -1874,8 +1921,8 @@
   // 住人の 呼びかけを ひとつ 前に足して 順ばんを そろえる
   // 台本の中の「トバ」を、いまの 名まえに 置きかえる
   function named(lines){
-    const n = (cfg.nushiName || "").trim();
-    if(!n || n === "トバ") return lines;
+    const n = nushiName();
+    if(n === "トバ") return lines;
     return lines.map(t => t.split("トバ").join(n));
   }
   function pickDialogFor(a, b){

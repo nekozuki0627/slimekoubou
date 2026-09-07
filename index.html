@@ -1202,6 +1202,13 @@
 
   // 絵をまるごと差しかえる。古い絵の情報を先に外さないと、
   // 「前のアニメ名」を新しい絵に対して再生しようとして落ちる
+  // よわった子の絵は「rest」の 4コマしか 持っていない。
+  // うっかり ほかの しぐさを させると そこで 止まってしまうので、ここを 通す
+  function playAnim(s, a){
+    const want = s.weak ? "rest" : a;
+    try{ if(s.curAnim() !== want) s.play(want); }catch(e){}
+  }
+
   function swapSprite(o, spriteName, animName){
     o.unuse("sprite");
     o.use(sprite(spriteName, { anim: animName }));
@@ -1265,7 +1272,7 @@
     if(Math.abs(d.x) > Math.abs(d.y)*1.1) want = (d.x < 0) ? "walkL" : "walkR";
     else if(d.y < 0)                      want = "away";   // むこうへ
     else                                  want = "walk";   // こっちへ
-    if(s.curAnim() !== want) s.play(want);
+    playAnim(s, want);
     s.face = null;      // 歩いている間は、向きは絵まかせ
   }
 
@@ -1350,6 +1357,19 @@
       const lo = Math.max(a[0], b[0]) + 10, hi = Math.min(a[1], b[1]) - 10;
       if(hi - lo > bw) bx = Math.max(lo, Math.min(bx, hi - bw));
       else bx = (lo + hi) / 2 - bw / 2;
+    }
+    // ほかの子の ことばと かさならないよう、空いている ところへ ずらす。
+    // 人数が 多いと ここが ないと 読めなくなる
+    if(!WIDGET && s.back.opacity > 0.02){
+      for(let i = 0; i < 10; i++){
+        const hit = bubRects.find(r =>
+          Math.abs(r.y - by) < BUB_PH + 2 &&
+          bx < r.x + r.w + 8 && r.x < bx + bw + 8);
+        if(!hit) break;
+        by = upper ? (hit.y - BUB_PH - 5) : (hit.y + BUB_PH + 5);
+      }
+      by = Math.max(4, Math.min(by, RH - BUB_PH - 4));
+      bubRects.push({ x: bx, y: by, w: bw });
     }
     s.back.pos = vec2(bx, by);
     s.back.width = bw; s.back.height = BUB_PH;
@@ -1500,6 +1520,10 @@
     if(rand() < 0.12) return clockLine() + '…';
     return pick(TALK_SLEEP);
   }
+
+  // このコマで もう 置いた ことばの 場所。毎コマ からにする
+  const bubRects = [];
+  onUpdate(()=>{ bubRects.length = 0; });
 
   function giveLife(s){
     s.bubLift = s.bubBase = (bubStep++ % 3) * 20;
@@ -1668,7 +1692,7 @@
     s.say = 2.2;
     s.cheerFor = 1.6;
     setBubble(s, "おわったよ！", rgb(62,180,137));
-    if(!s.weak) s.play("cheer");
+    playAnim(s, "cheer");
     sparkle(s);
     s.rest = 0;
     s.target = floorPoint(s);
@@ -1749,7 +1773,7 @@
     if(!s || s.dying) return;
     s.dying = true;
     s.job = null;
-    s.play("cheer");
+    playAnim(s, "cheer");
     s.say = 99;                     // これ以上しゃべらせない
     setBubble(s, "おわったよ！", rgb(62,180,137));
     sparkle(s);
@@ -2257,8 +2281,17 @@
 
   // 指名はチャット名でおぼえる。id はセッションごとに変わってしまうため
   function chooseVisible(list){
-    // おわった子も のこす。新しい子に 押し出されるまで 部屋にいる
-    const live = list;
+    // おわった子も のこす。新しい子に 押し出されるまで 部屋にいる。
+    // ただし 入れかえを くりかえすと 同じ名前の 抜けがらが たまるので、
+    // 生きている子と 同じ名前の おわった子は 出さない。
+    // おわった子は ぜんぶで 2ひきまで
+    const alive = new Set(list.filter(x => !x.leaving).map(x => x.name));
+    let gone = 0;
+    const live = list.filter(x => {
+      if(!x.leaving) return true;
+      if(alive.has(x.name)) return false;
+      return ++gone <= 2;
+    });
     if(view.mode === "pick" && view.picked.length){
       const want = new Set(view.picked);
       const hit = live.filter(x => want.has(x.name));
@@ -2519,16 +2552,21 @@
     const alive = new Set(visible.map(x => x.id));
 
     // 見せなくなったセッション → その子は帰る
+    // ひとりで つまずいても、ほかの子や この後の しごとを 止めない。
+    // ここが 止まると 画面の 入れかえも 止まり、古いままに なってしまう
     for(const [id, s] of Array.from(bySession)){
       if(alive.has(id)) continue;
       bySession.delete(id);
-      farewell(s);
+      try{ farewell(s); }
+      catch(e){ try{ destroy(s); }catch(e2){} }
     }
     // 新しく見せるセッション → 1匹ふえる
     visible.forEach(sess=>{
-      let s = bySession.get(sess.id);
-      if(!s){ s = spawnFor(sess); bySession.set(sess.id, s); }
-      applySession(s, sess);
+      try{
+        let s = bySession.get(sess.id);
+        if(!s){ s = spawnFor(sess); bySession.set(sess.id, s); }
+        applySession(s, sess);
+      }catch(e){ console.warn("この子は とばした:", sess && sess.name, e); }
     });
 
     // 持ち場を配る。いそぎの順は サーバーの並びをそのまま使う

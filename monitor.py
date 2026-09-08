@@ -247,6 +247,110 @@ def weigh(path):
     return out
 
 
+# ── 部屋の 引きつぎ ──
+# 出先からだと、画面の ボタンを 押せない ことが ある。
+# そこで「次の部屋は これ」という 覚え書きを 工房が あずかって、
+# 新しく 立った 部屋に そのまま 伝える。
+# こうすると つかい手は「新しい部屋を 作る」だけで すむ
+HANDOVER = os.path.join(HERE, "_handover.json")
+HANDOVER_LIFE = 12 * 60 * 60          # これを すぎた 覚え書きは 忘れる
+
+
+def read_handover():
+    try:
+        with open(HANDOVER, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(d, dict) or not d.get("name"):
+        return None
+    # 時こくは 手で 書かれない ことが 多いので、
+    # 書いていなければ ファイルの 更新時こくを つかう
+    at = d.get("at")
+    if not at:
+        try:
+            at = os.path.getmtime(HANDOVER)
+        except OSError:
+            at = time.time()
+    if time.time() - float(at) > HANDOVER_LIFE:
+        return None
+    return d
+
+
+def save_handover(d):
+    try:
+        tmp = HANDOVER + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(d, f, ensure_ascii=False)
+        os.replace(tmp, HANDOVER)
+        return True
+    except Exception:
+        return False
+
+
+def clear_handover():
+    try:
+        os.remove(HANDOVER)
+    except Exception:
+        pass
+
+
+def _title_of(sid):
+    with _lock:
+        return ((_sessions.get(sid) or {}).get("title") or "").strip()
+
+
+def hand_note(sid):
+    """
+    引きつぎの 覚え書きが あれば、その ぶんの 耳うちを 返す。
+    ・新しく 立った 部屋 … あとを つぐ ための 手順
+    ・引きついで もらった 部屋 … もう 閉じて いい、という 知らせ
+    """
+    d = read_handover()
+    if not d:
+        return None
+    name = d.get("name") or ""
+    mine = _title_of(sid)
+
+    # あとつぎが 名まえを 引きついだかは、だれが 聞きに来ても 見ておく。
+    # あとつぎが だまっていても、もとの部屋に 知らせが 行くように
+    tb = d.get("taken_by")
+    if tb and not d.get("renamed") and _title_of(tb) == name:
+        d["renamed"] = True
+        save_handover(d)
+
+    if sid == tb:
+        return None
+
+    # 引きついで もらった 側（もとの部屋）。名まえが 同じ
+    if mine and mine == name and d.get("renamed"):
+        clear_handover()
+        return ("[引きつぎ] あとつぎの 部屋が 立ち上がって、名まえも 引きつぎました。"
+                "この部屋の しごとは もう ありません。"
+                "archive_session(\"self\") で この部屋を 閉じてください。")
+
+    # まだ あとつぎが いない。新しく 立った 部屋（会話が ほとんど 無く、名まえも まだ）
+    if not d.get("taken_by") and not mine:
+        with _lock:
+            path = ((_sessions.get(sid) or {}).get("transcript"))
+        h = weigh(path) or {}
+        # 測れない時は「立ったばかり」とみなす。
+        # 名まえも 会話も 無い部屋が それに あたる
+        if h.get("msgs", 0) <= 40:
+            d["taken_by"] = sid
+            d["at_taken"] = time.time()
+            save_handover(d)
+            return (
+                "[引きつぎ] この部屋は『%s』の あとつぎです。つぎの 順で 引きついでください。"
+                "(1)set_session_title で この部屋の 名まえを『%s』に する "
+                "(2)%s を 読んで、これまでの 経緯・判断・やり残しを 引きつぐ "
+                "(3)つかい手に「引きつぎました。つづきから やれます」と 短く 伝える。"
+                "この あと、もとの部屋には こちらから 知らせが 行きます。"
+                % (name, name, d.get("file") or "（引きつぎの ファイル）")
+            )
+    return None
+
+
 def weak_note(sid):
     """
     よわった部屋の トバに 渡す 耳うち。
@@ -269,13 +373,18 @@ def weak_note(sid):
         "いま 手をつけている ことが 一区切りついたら、"
         "『この部屋、そろそろ 新しくしよう』と %sに 一言 出すこと。"
         "同意が とれたら、"
-        "(1)これまでの 経緯・判断・やり残しを 省かずに 書き出す "
-        "(2)spawn_task で チップを 出す"
-        "（title＝いまと 同じ セッション名／prompt＝その 書き出し 全文）"
-        "(3)新しい部屋が 立ったのを 見てから archive_session(\"self\") で"
-        " この部屋を 閉じる。"
+        "(1)これまでの 経緯・判断・やり残しを 省かずに 書き出して、"
+        "ファイルに 保存する（作業フォルダに 引きつぎ_<セッション名>.md）"
+        "(2)つぎの ファイルを 書く（Write で そのまま 作る）。"
+        "置き場： %s ／ 中身は "
+        "{\"name\": \"いまの セッション名\", \"file\": \"いま 書いた 引きつぎファイルの 道すじ\"} "
+        "(3)%sに「新しい部屋を 作ってください。名まえは こちらで 付けます」と 伝える"
+        "（出先の スマホからでも 新しい部屋は 作れる。画面の ボタンは 押さなくてよい）"
+        "(4)新しい部屋が 引きついだら この部屋にも 知らせが 来るので、"
+        "そこで archive_session(\"self\") で 閉じる。"
         "作業の 途中では 言わない。急かさない。1回 言って 断られたら もう 言わない。"
-        % (h["msgs"], h["mb"], h["weight"] * 100, who)
+        % (h["msgs"], h["mb"], h["weight"] * 100, who,
+           HANDOVER.replace("\\", "/"), who)
     )
 
 
@@ -588,6 +697,31 @@ class Handler(BaseHTTPRequestHandler):
         from urllib.parse import urlparse, parse_qs
         u = urlparse(self.path)
         # やり残しの チェックだけは スマホからも 受ける
+        # 引きつぎを あずかる
+        if u.path == "/api/handover":
+            if not self._local():
+                return self._send(403, "local only", "text/plain; charset=utf-8")
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                d = json.loads((self.rfile.read(n) or b"{}").decode("utf-8"))
+            except Exception:
+                d = {}
+            if not isinstance(d, dict) or not d.get("name"):
+                return self._send(400, json.dumps(
+                    {"ok": False, "msg": "name が いります"}, ensure_ascii=False))
+            d["at"] = time.time()
+            d.pop("taken", None)
+            ok = save_handover(d)
+            self._log("引きつぎを あずかった: " + str(d.get("name")))
+            return self._send(200, json.dumps({"ok": ok}, ensure_ascii=False))
+
+        if u.path == "/api/handover/done":
+            if not self._local():
+                return self._send(403, "local only", "text/plain; charset=utf-8")
+            clear_handover()
+            self._log("引きつぎ おわり")
+            return self._send(200, json.dumps({"ok": True}, ensure_ascii=False))
+
         if u.path == "/api/todo/done":
             if not self._allowed():
                 return
@@ -634,8 +768,16 @@ class Handler(BaseHTTPRequestHandler):
         # 返した ことばは、その部屋の トバへの 耳うちに なる
         #（Claude の additionalContext）
         if event == "ask":
+            # まだ 知らない 部屋の ことが あるので、会話の 置き場だけ おぼえる
             try:
-                note = weak_note(payload.get("session_id"))
+                if payload.get("session_id"):
+                    with _lock:
+                        _touch(payload["session_id"], payload)
+            except Exception:
+                pass
+            try:
+                sid0 = payload.get("session_id")
+                note = hand_note(sid0) or weak_note(sid0)
                 if note:
                     return self._send(200, json.dumps(
                         {"hookSpecificOutput": {

@@ -343,18 +343,53 @@ def clear_handover():
 def is_spare(title):
     """空き部屋か。名まえが 目じるしで はじまる 部屋"""
     t = (title or "").strip()
-    return bool(t) and t.startswith(SPARE_MARK)
+    return bool(t) and any(t.startswith(m) for m in SPARE_MARKS)
+
+
+# 会話の 置き場を さがす ための ひきだし
+_JSONL = {}
+_JSONL_AT = 0.0
+
+
+def _find_jsonl(sid):
+    """その部屋の 会話ファイルを さがす"""
+    global _JSONL_AT
+    now = time.time()
+    if sid in _JSONL:
+        return _JSONL[sid]
+    if now - _JSONL_AT < 20.0:
+        return None
+    _JSONL_AT = now
+    import glob
+    root = os.path.join(os.path.expanduser("~"), ".claude", "projects")
+    for f in glob.glob(os.path.join(root, "*", "*.jsonl")):
+        name = os.path.basename(f)[:-6]
+        _JSONL.setdefault(name, f)
+    return _JSONL.get(sid)
 
 
 def spare_ids():
-    """いま 空いている 部屋の id"""
+    """
+    いま 空いている 部屋の id。
+    ⚠️ 空き部屋は まだ 一言も 喋っていない ので、
+    工房の 手もとには 出てこない。生きている 部屋の 一覧から さがす
+    """
     out = []
+    live = _LIVE
+    if not live:
+        return out
     with _lock:
-        for sid, s in _sessions.items():
-            if s.get("ended") is not None or s.get("left"):
-                continue
-            if is_spare(s.get("title")):
-                out.append(sid)
+        known = dict(_sessions)
+    for sid in live:
+        s = known.get(sid) or {}
+        title = (s.get("title") or "").strip()
+        if not title:
+            path = s.get("transcript") or _find_jsonl(sid)
+            if path:
+                t, _ = read_transcript(path)
+                title = (t or "").strip()
+        if is_spare(title):
+            out.append(sid)
     return out
 
 
@@ -454,7 +489,7 @@ def weak_note(sid):
         "置き場： %s ／ 中身は "
         "{\"name\": \"いまの セッション名\", \"file\": \"いま 書いた 引きつぎファイルの 道すじ\"} "
         "(3)%sに つぎのように 伝える。"
-        "空き部屋（名まえが「%s」で はじまる 部屋）が あれば"
+        "空き部屋（名まえが「%s」などで はじまる 部屋）が あれば"
         "「その部屋を ひらいて 一言 打ってください。あとは こちらで 引きつぎます」、"
         "無ければ「新しい部屋を ひとつ 作ってください」。"
         "⚠️ 出先の 遠あやつりでは 新しい部屋を 作れないので、"
@@ -463,7 +498,7 @@ def weak_note(sid):
         "そこで archive_session(\"self\") で 閉じる。"
         "作業の 途中では 言わない。急かさない。1回 言って 断られたら もう 言わない。"
         % (h["msgs"], h["mb"], h["weight"] * 100, who,
-           HANDOVER.replace("\\", "/"), who, SPARE_MARK)
+           HANDOVER.replace("\\", "/"), who, "／".join(SPARE_MARKS[:3]))
     )
 
 
@@ -695,7 +730,7 @@ def snapshot():
         todo = [{"id": "spare", "session": (waiting[0].get("name") or ""),
                  "title": "空き部屋を %d つ 作る（名まえを「%s1」などに）。"
                           "引っこし先を まっている：%s"
-                          % (len(waiting) - len(spare), SPARE_MARK, names),
+                          % (len(waiting) - len(spare), SPARE_MARKS[0], names),
                  "why": "出先からは 新しい部屋を 作れないため",
                  "url": ""}] + todo
     return {"sessions": out, "total": len(out), "rev": page_rev(),
@@ -1252,7 +1287,9 @@ TODO_MARK = "@me"
 # そこで あらかじめ 空の部屋を いくつか 作っておき、
 # 引っこしの 時は その部屋を あとつぎに する。
 # つかい手は「よび1」のように 名まえを 付けて おくだけ
-SPARE_MARK = "よび"
+# 呼び方は 人に よるので、よくある 言い方は ぜんぶ 通す。
+# _config.json の spare_mark で 足したり 変えたり できる
+SPARE_MARKS = ["よび", "予備", "空き", "あき", "spare"]
 # スライムが つかい手を 呼ぶ 名まえ。ここに 書いておくと、
 # このPCで 見る どの画面でも 同じ 呼び名に なる（画面ごとに 入れなおさずに すむ）
 USER_NAME = ""
@@ -1274,7 +1311,7 @@ TOKEN = ""              # 合言葉
 
 
 def load_config():
-    global TODO_FILE, TODO_MARK, USER_NAME, SHARE, SHOW, TOKEN, SPARE_MARK
+    global TODO_FILE, TODO_MARK, USER_NAME, SHARE, SHOW, TOKEN, SPARE_MARKS
     d = {}
     try:
         with open(CONFIG, "r", encoding="utf-8") as f:
@@ -1283,7 +1320,11 @@ def load_config():
         d = {}
     TODO_FILE = os.path.expanduser(d.get("todo_file") or TODO_FILE)
     TODO_MARK = d.get("todo_mark") or TODO_MARK
-    SPARE_MARK = d.get("spare_mark") or SPARE_MARK
+    m = d.get("spare_mark")
+    if isinstance(m, str) and m.strip():
+        SPARE_MARKS = [m.strip()]
+    elif isinstance(m, list) and m:
+        SPARE_MARKS = [str(x).strip() for x in m if str(x).strip()]
     USER_NAME = (d.get("user_name") or "").strip()
     SHARE = bool(d.get("share"))
     SHOW = d.get("show") if d.get("show") in ("all", "work", "name") else "all"

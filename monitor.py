@@ -394,8 +394,45 @@ def spare_ids():
 
 
 def _title_of(sid):
+    """
+    その部屋の 名まえ。
+    ⚠️ 手もとの 覚えは 画面を 出す時にしか 更新されないので、
+    まだ 知らない時は 会話ファイルから 直に 読む。
+    （ここを 手ぬきすると、話しかけた その1回目に 気づけない）
+    """
     with _lock:
-        return ((_sessions.get(sid) or {}).get("title") or "").strip()
+        s = _sessions.get(sid) or {}
+        t = (s.get("title") or "").strip()
+        path = s.get("transcript")
+    if t:
+        return t
+    path = path or _find_jsonl(sid)
+    if not path:
+        return ""
+    t, _ = read_transcript(path)
+    t = (t or "").strip()
+    if t:
+        with _lock:
+            if sid in _sessions:
+                _sessions[sid]["title"] = t
+    return t
+
+
+def _same_name(a, b):
+    """名まえくらべ。大文字小文字や 前後の あきは 見ない
+    （「Miraii」と「miraii」を 別の部屋と 見て しくじった）"""
+    return (a or "").strip().lower() == (b or "").strip().lower()
+
+
+def _sid_named(name, but=None):
+    """その名まえの 部屋を さがす（あとつぎ 本人は のぞく）"""
+    live = _LIVE or set()
+    for sid in list(live):
+        if sid == but:
+            continue
+        if _same_name(_title_of(sid), name):
+            return sid
+    return None
 
 
 def hand_note(sid):
@@ -413,7 +450,7 @@ def hand_note(sid):
     changed = False
     for d in rows:
         tb = d.get("taken_by")
-        if tb and not d.get("renamed") and _title_of(tb) == d.get("name"):
+        if tb and not d.get("renamed") and _same_name(_title_of(tb), d.get("name")):
             d["renamed"] = True
             changed = True
     if changed:
@@ -421,7 +458,7 @@ def hand_note(sid):
 
     # 引きついで もらった 側（もとの部屋）。名まえが 同じで、自分は あとつぎでない
     for d in rows:
-        if mine and mine == d.get("name") and d.get("renamed") and sid != d.get("taken_by"):
+        if mine and _same_name(mine, d.get("name")) and d.get("renamed") and sid != d.get("taken_by"):
             drop_handover(d["name"])
             return ("[引きつぎ] あとつぎの 部屋が 立ち上がって、名まえも 引きつぎました。"
                     "この部屋の しごとは もう ありません。"
@@ -450,14 +487,26 @@ def hand_note(sid):
 
     d["taken_by"] = sid
     d["at_taken"] = time.time()
+    old_sid = _sid_named(d.get("name"), but=sid)
+    if old_sid:
+        d["old_sid"] = old_sid
     save_handover(d)
+    tail = ""
+    if old_sid:
+        # 古い部屋に つかい手が わざわざ 行かなくて すむように、
+        # あとつぎが その場で 閉じる
+        tail = ("(4)引きつぎを 読み終えたら、もとの部屋を 閉じる。"
+                "archive_session(session_id=\"%s\") "
+                "（これが もとの『%s』の 部屋。つかい手が そちらへ 行く 手間を はぶくため、"
+                "あとつぎの あなたが 閉じる）。"
+                % (old_sid, d.get("name")))
     return (
         "[引きつぎ] この部屋は『%s』の あとつぎです。つぎの 順で 引きついでください。"
         "(1)set_session_title で この部屋の 名まえを『%s』に する "
         "(2)%s を 読んで、これまでの 経緯・判断・やり残しを 引きつぐ "
         "(3)つかい手に「引きつぎました。つづきから やれます」と 短く 伝える。"
-        "この あと、もとの部屋には こちらから 知らせが 行きます。"
-        % (d.get("name"), d.get("name"), d.get("file") or "（引きつぎの ファイル）")
+        "%s"
+        % (d.get("name"), d.get("name"), d.get("file") or "（引きつぎの ファイル）", tail)
     )
 
 

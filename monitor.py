@@ -256,43 +256,106 @@ HANDOVER = os.path.join(HERE, "_handover.json")
 HANDOVER_LIFE = 12 * 60 * 60          # これを すぎた 覚え書きは 忘れる
 
 
-def read_handover():
+# 書きこむ 側は「1件だけの 小さな ファイル」を 置く（手で 書くので かんたんに）。
+# 工房は それを 台帳（_handovers.json）に 積みかえて、何件でも あずかる。
+# こうしないと、2つの 部屋が 同時に 引っこす時 先の1件が 消える
+HANDOVERS = os.path.join(HERE, "_handovers.json")
+
+
+def _load_list():
     try:
-        with open(HANDOVER, "r", encoding="utf-8") as f:
+        with open(HANDOVERS, "r", encoding="utf-8") as f:
             d = json.load(f)
+        return [x for x in d if isinstance(x, dict) and x.get("name")]
     except Exception:
-        return None
-    if not isinstance(d, dict) or not d.get("name"):
-        return None
-    # 時こくは 手で 書かれない ことが 多いので、
-    # 書いていなければ ファイルの 更新時こくを つかう
-    at = d.get("at")
-    if not at:
-        try:
-            at = os.path.getmtime(HANDOVER)
-        except OSError:
-            at = time.time()
-    if time.time() - float(at) > HANDOVER_LIFE:
-        return None
-    return d
+        return []
 
 
-def save_handover(d):
+def _save_list(rows):
     try:
-        tmp = HANDOVER + ".tmp"
+        tmp = HANDOVERS + ".tmp"
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-            json.dump(d, f, ensure_ascii=False)
-        os.replace(tmp, HANDOVER)
+            json.dump(rows, f, ensure_ascii=False)
+        os.replace(tmp, HANDOVERS)
         return True
     except Exception:
         return False
 
 
-def clear_handover():
+def _intake():
+    """置かれた 1件を 台帳に 積みかえる"""
     try:
-        os.remove(HANDOVER)
+        with open(HANDOVER, "r", encoding="utf-8") as f:
+            d = json.load(f)
     except Exception:
-        pass
+        return
+    if not isinstance(d, dict) or not d.get("name"):
+        return
+    if not d.get("at"):
+        try:
+            d["at"] = os.path.getmtime(HANDOVER)
+        except OSError:
+            d["at"] = time.time()
+    rows = [x for x in _load_list() if x.get("name") != d.get("name")]
+    rows.append(d)
+    if _save_list(rows):
+        try:
+            os.remove(HANDOVER)
+        except Exception:
+            pass
+
+
+def all_handovers():
+    """まだ 終わっていない 引きつぎ ぜんぶ"""
+    _intake()
+    now = time.time()
+    rows = [x for x in _load_list()
+            if now - float(x.get("at") or now) <= HANDOVER_LIFE]
+    if len(rows) != len(_load_list()):
+        _save_list(rows)
+    return rows
+
+
+def read_handover():
+    """まだ あとつぎが いない ぶんの 先頭 1件"""
+    for x in all_handovers():
+        if not x.get("taken_by"):
+            return x
+    rows = all_handovers()
+    return rows[0] if rows else None
+
+
+def save_handover(d):
+    rows = [x for x in _load_list() if x.get("name") != d.get("name")]
+    rows.append(d)
+    return _save_list(rows)
+
+
+def drop_handover(name):
+    _save_list([x for x in _load_list() if x.get("name") != name])
+
+
+def clear_handover():
+    """（のこして あるのは 昔の 書きかた。いまは 名まえで 落とす）"""
+    _save_list([])
+
+
+def is_spare(title):
+    """空き部屋か。名まえが 目じるしで はじまる 部屋"""
+    t = (title or "").strip()
+    return bool(t) and t.startswith(SPARE_MARK)
+
+
+def spare_ids():
+    """いま 空いている 部屋の id"""
+    out = []
+    with _lock:
+        for sid, s in _sessions.items():
+            if s.get("ended") is not None or s.get("left"):
+                continue
+            if is_spare(s.get("title")):
+                out.append(sid)
+    return out
 
 
 def _title_of(sid):
@@ -303,52 +366,64 @@ def _title_of(sid):
 def hand_note(sid):
     """
     引きつぎの 覚え書きが あれば、その ぶんの 耳うちを 返す。
-    ・新しく 立った 部屋 … あとを つぐ ための 手順
+    ・空き部屋 / 立ったばかりの 部屋 … あとを つぐ ための 手順
     ・引きついで もらった 部屋 … もう 閉じて いい、という 知らせ
     """
-    d = read_handover()
-    if not d:
+    rows = all_handovers()
+    if not rows:
         return None
-    name = d.get("name") or ""
     mine = _title_of(sid)
 
-    # あとつぎが 名まえを 引きついだかは、だれが 聞きに来ても 見ておく。
-    # あとつぎが だまっていても、もとの部屋に 知らせが 行くように
-    tb = d.get("taken_by")
-    if tb and not d.get("renamed") and _title_of(tb) == name:
-        d["renamed"] = True
-        save_handover(d)
+    # あとつぎが 名まえを 引きついだかは、だれが 聞きに来ても 見ておく
+    changed = False
+    for d in rows:
+        tb = d.get("taken_by")
+        if tb and not d.get("renamed") and _title_of(tb) == d.get("name"):
+            d["renamed"] = True
+            changed = True
+    if changed:
+        _save_list(rows)
 
-    if sid == tb:
+    # 引きついで もらった 側（もとの部屋）。名まえが 同じで、自分は あとつぎでない
+    for d in rows:
+        if mine and mine == d.get("name") and d.get("renamed") and sid != d.get("taken_by"):
+            drop_handover(d["name"])
+            return ("[引きつぎ] あとつぎの 部屋が 立ち上がって、名まえも 引きつぎました。"
+                    "この部屋の しごとは もう ありません。"
+                    "archive_session(\"self\") で この部屋を 閉じてください。")
+
+    # 自分が あとつぎ 本人なら、もう 何も 言わない
+    if any(sid == d.get("taken_by") for d in rows):
         return None
 
-    # 引きついで もらった 側（もとの部屋）。名まえが 同じ
-    if mine and mine == name and d.get("renamed"):
-        clear_handover()
-        return ("[引きつぎ] あとつぎの 部屋が 立ち上がって、名まえも 引きつぎました。"
-                "この部屋の しごとは もう ありません。"
-                "archive_session(\"self\") で この部屋を 閉じてください。")
+    # あとつぎを さがしている ぶん（古い順に 1件）
+    waiting = [d for d in rows if not d.get("taken_by")]
+    if not waiting:
+        return None
+    d = waiting[0]
 
-    # まだ あとつぎが いない。新しく 立った 部屋（会話が ほとんど 無く、名まえも まだ）
-    if not d.get("taken_by") and not mine:
-        with _lock:
-            path = ((_sessions.get(sid) or {}).get("transcript"))
-        h = weigh(path) or {}
-        # 測れない時は「立ったばかり」とみなす。
-        # 名まえも 会話も 無い部屋が それに あたる
-        if h.get("msgs", 0) <= 40:
-            d["taken_by"] = sid
-            d["at_taken"] = time.time()
-            save_handover(d)
-            return (
-                "[引きつぎ] この部屋は『%s』の あとつぎです。つぎの 順で 引きついでください。"
-                "(1)set_session_title で この部屋の 名まえを『%s』に する "
-                "(2)%s を 読んで、これまでの 経緯・判断・やり残しを 引きつぐ "
-                "(3)つかい手に「引きつぎました。つづきから やれます」と 短く 伝える。"
-                "この あと、もとの部屋には こちらから 知らせが 行きます。"
-                % (name, name, d.get("file") or "（引きつぎの ファイル）")
-            )
-    return None
+    # あとつぎに なれるのは
+    #   ・空き部屋（よび◯）… 出先からでも これを ひらいて 一言 打てば 引きつげる
+    #   ・立ったばかりの 部屋（名まえも 会話も まだ）… パソコンの 前に いる時
+    if not (is_spare(mine) or not mine):
+        return None
+    with _lock:
+        path = ((_sessions.get(sid) or {}).get("transcript"))
+    h = weigh(path) or {}
+    if not (is_spare(mine) or h.get("msgs", 0) <= 40):
+        return None
+
+    d["taken_by"] = sid
+    d["at_taken"] = time.time()
+    save_handover(d)
+    return (
+        "[引きつぎ] この部屋は『%s』の あとつぎです。つぎの 順で 引きついでください。"
+        "(1)set_session_title で この部屋の 名まえを『%s』に する "
+        "(2)%s を 読んで、これまでの 経緯・判断・やり残しを 引きつぐ "
+        "(3)つかい手に「引きつぎました。つづきから やれます」と 短く 伝える。"
+        "この あと、もとの部屋には こちらから 知らせが 行きます。"
+        % (d.get("name"), d.get("name"), d.get("file") or "（引きつぎの ファイル）")
+    )
 
 
 def weak_note(sid):
@@ -378,13 +453,17 @@ def weak_note(sid):
         "(2)つぎの ファイルを 書く（Write で そのまま 作る）。"
         "置き場： %s ／ 中身は "
         "{\"name\": \"いまの セッション名\", \"file\": \"いま 書いた 引きつぎファイルの 道すじ\"} "
-        "(3)%sに「新しい部屋を 作ってください。名まえは こちらで 付けます」と 伝える"
-        "（出先の スマホからでも 新しい部屋は 作れる。画面の ボタンは 押さなくてよい）"
+        "(3)%sに つぎのように 伝える。"
+        "空き部屋（名まえが「%s」で はじまる 部屋）が あれば"
+        "「その部屋を ひらいて 一言 打ってください。あとは こちらで 引きつぎます」、"
+        "無ければ「新しい部屋を ひとつ 作ってください」。"
+        "⚠️ 出先の 遠あやつりでは 新しい部屋を 作れないので、"
+        "空き部屋が ある時は かならず そちらを 案内すること"
         "(4)新しい部屋が 引きついだら この部屋にも 知らせが 来るので、"
         "そこで archive_session(\"self\") で 閉じる。"
         "作業の 途中では 言わない。急かさない。1回 言って 断られたら もう 言わない。"
         % (h["msgs"], h["mb"], h["weight"] * 100, who,
-           HANDOVER.replace("\\", "/"), who)
+           HANDOVER.replace("\\", "/"), who, SPARE_MARK)
     )
 
 
@@ -607,8 +686,20 @@ def snapshot():
         return 4            # おわった子。押し出されるのは この子から
     out.sort(key=lambda x: (rank(x), x["idle"]))
     todo = read_todo()
+    # 空き部屋が 尽きていて、引っこしを 待っている 時だけ 出す。
+    # つかい手の 台帳には 書きこまない（勝手に 足すと じゃまに なる）
+    spare = spare_ids()
+    waiting = [x for x in all_handovers() if not x.get("taken_by")]
+    if waiting and len(spare) < len(waiting):
+        names = "・".join(x.get("name") or "" for x in waiting[:3])
+        todo = [{"id": "spare", "session": (waiting[0].get("name") or ""),
+                 "title": "空き部屋を %d つ 作る（名まえを「%s1」などに）。"
+                          "引っこし先を まっている：%s"
+                          % (len(waiting) - len(spare), SPARE_MARK, names),
+                 "why": "出先からは 新しい部屋を 作れないため",
+                 "url": ""}] + todo
     return {"sessions": out, "total": len(out), "rev": page_rev(),
-            "soon": next_task(),
+            "soon": next_task(), "spare": len(spare),
             "todo": [{"id": t.get("id"), "title": t.get("title", ""),
                       "session": t.get("session", ""),
                       "tag": first_word(t.get("session", "")),
@@ -1156,6 +1247,12 @@ def next_task():
 # 人によって 台帳の 置き場は ちがうので、決めうちに しない
 TODO_FILE = os.path.join(HERE, "todo.md")
 TODO_MARK = "@me"
+# ── 空き部屋（よび）──
+# 出先の 遠あやつりでは、新しい 部屋を 作れない。
+# そこで あらかじめ 空の部屋を いくつか 作っておき、
+# 引っこしの 時は その部屋を あとつぎに する。
+# つかい手は「よび1」のように 名まえを 付けて おくだけ
+SPARE_MARK = "よび"
 # スライムが つかい手を 呼ぶ 名まえ。ここに 書いておくと、
 # このPCで 見る どの画面でも 同じ 呼び名に なる（画面ごとに 入れなおさずに すむ）
 USER_NAME = ""
@@ -1177,7 +1274,7 @@ TOKEN = ""              # 合言葉
 
 
 def load_config():
-    global TODO_FILE, TODO_MARK, USER_NAME, SHARE, SHOW, TOKEN
+    global TODO_FILE, TODO_MARK, USER_NAME, SHARE, SHOW, TOKEN, SPARE_MARK
     d = {}
     try:
         with open(CONFIG, "r", encoding="utf-8") as f:
@@ -1186,6 +1283,7 @@ def load_config():
         d = {}
     TODO_FILE = os.path.expanduser(d.get("todo_file") or TODO_FILE)
     TODO_MARK = d.get("todo_mark") or TODO_MARK
+    SPARE_MARK = d.get("spare_mark") or SPARE_MARK
     USER_NAME = (d.get("user_name") or "").strip()
     SHARE = bool(d.get("share"))
     SHOW = d.get("show") if d.get("show") in ("all", "work", "name") else "all"

@@ -11,12 +11,20 @@ Claude Code の裏側で いま なにが 起きているかを、
 
 ## 入れかた
 
-Claude Code で つぎの 2行を 打つだけです。
+**パソコンの ターミナル**（Windows は PowerShell、Mac は ターミナル）で
+つぎの 2行を 打ちます。
 
 ```
-/plugin marketplace add nekozuki0627/slimekoubou
-/plugin install slime-koubou@arillo
+claude plugin marketplace add nekozuki0627/slimekoubou
 ```
+```
+claude plugin install slime-koubou@arillo
+```
+
+> ⚠️ Claude の 入力欄に `/plugin …` と 打つ やりかたは
+> **デスクトップアプリでは 使えません**
+> （`/plugin isn't available in this environment.` と 出ます）。
+> 上の `claude plugin …` なら、どの つかい方でも 通ります。
 
 そのあと Claude Code を 開きなおすと、**工房は ひとりでに 立ち上がります**。
 ブラウザで <http://127.0.0.1:8899/> を ひらくと 部屋が 見られます。

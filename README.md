@@ -11,8 +11,15 @@ Claude Code の裏側で いま なにが 起きているかを、
 
 ## 入れかた
 
-**パソコンの ターミナル**（Windows は PowerShell、Mac は ターミナル）で
-つぎの 2行を 打ちます。
+**Claude Code に つぎのように たのむ だけ**です。
+コマンドを 打つ 必要は ありません。
+
+> スライムこうぼう を 入れて ください。
+> `claude plugin marketplace add nekozuki0627/slimekoubou` と
+> `claude plugin install slime-koubou@arillo` を 実行して、
+> そのあと ちゃんと 立ち上がったか 確かめて ください。
+
+自分で 打ちたい人は、ターミナル（Windows は PowerShell）で この 2行です。
 
 ```
 claude plugin marketplace add nekozuki0627/slimekoubou

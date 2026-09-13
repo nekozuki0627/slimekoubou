@@ -340,6 +340,58 @@ def clear_handover():
     _save_list([])
 
 
+# ── スマホの 名まえの ずれ ──
+# パソコンで 部屋の 名まえを 変えても、スマホ（遠あやつり）の 一覧は そのまま。
+# 空き部屋が 名まえを 引きついだら、部屋の外の 一覧に「スマホで 名まえを 変える」を 出す
+RENAMES = os.path.join(HERE, "_renames.json")
+RENAME_LIFE = 3 * 24 * 60 * 60
+
+
+def _load_renames():
+    try:
+        with open(RENAMES, "r", encoding="utf-8") as f:
+            rows = json.load(f)
+        return rows if isinstance(rows, list) else []
+    except Exception:
+        return []
+
+
+def _save_renames(rows):
+    try:
+        tmp = RENAMES + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(rows, f, ensure_ascii=False)
+        os.replace(tmp, RENAMES)
+        return True
+    except Exception:
+        return False
+
+
+def add_rename(frm, to):
+    if not frm or not to or frm == to:
+        return
+    rows = [x for x in _load_renames() if not (x.get("from") == frm and x.get("to") == to)]
+    rows.append({"id": "rename-%d" % int(time.time() * 1000), "from": frm, "to": to, "at": time.time()})
+    _save_renames(rows)
+
+
+def rename_todos():
+    now = time.time()
+    rows = [x for x in _load_renames() if now - float(x.get("at") or now) <= RENAME_LIFE]
+    return [{"id": x["id"], "session": x.get("to", ""),
+             "title": "スマホで『%s』を 長押しして、名まえを『%s』に 変える" % (x.get("from"), x.get("to")),
+             "why": "パソコンで 名まえを 変えても、スマホの 一覧は そのまま なので",
+             "url": ""} for x in rows]
+
+
+def done_rename(tid):
+    rows = _load_renames()
+    left = [x for x in rows if x.get("id") != tid]
+    if len(left) == len(rows):
+        return False
+    return _save_renames(left)
+
+
 def is_spare(title):
     """空き部屋か。名まえが 目じるしで はじまる 部屋"""
     t = (title or "").strip()
@@ -487,26 +539,27 @@ def hand_note(sid):
 
     d["taken_by"] = sid
     d["at_taken"] = time.time()
+    d["from_name"] = mine or ""
+    if mine:
+        add_rename(mine, d.get("name"))
     old_sid = _sid_named(d.get("name"), but=sid)
     if old_sid:
         d["old_sid"] = old_sid
     save_handover(d)
-    tail = ""
-    if old_sid:
-        # 古い部屋に つかい手が わざわざ 行かなくて すむように、
-        # あとつぎが その場で 閉じる
-        tail = ("(4)引きつぎを 読み終えたら、もとの部屋を 閉じる。"
-                "archive_session(session_id=\"%s\") "
-                "（これが もとの『%s』の 部屋。つかい手が そちらへ 行く 手間を はぶくため、"
-                "あとつぎの あなたが 閉じる）。"
-                % (old_sid, d.get("name")))
+    # もとの部屋を 閉じるには アプリ側の 番号（local_…）が いる。工房の 番号では 閉じられないので、
+    # あとつぎ自身に list_sessions で さがしてもらう
+    tail = ("(4)引きつぎを 読み終えたら、もとの部屋を 閉じる。ToolSearch で "
+            "select:mcp__ccd_session_mgmt__list_sessions,mcp__ccd_session_mgmt__archive_session を 読み込み、"
+            "list_sessions で 名まえが『%s』の もう1つの 部屋を さがして archive_session で 閉じる"
+            "（止められたら 無理に しない。つかい手に「もとの部屋を 閉じておいて」と 一言）。" % d.get("name"))
+    phone = ("。スマホでは まだ『%s』と 見えるかも。長押しで『%s』に 変えてね" % (mine, d.get("name"))) if mine else ""
     return (
         "[引きつぎ] この部屋は『%s』の あとつぎです。つぎの 順で 引きついでください。"
         "(1)set_session_title で この部屋の 名まえを『%s』に する "
         "(2)%s を 読んで、これまでの 経緯・判断・やり残しを 引きつぐ "
-        "(3)つかい手に「引きつぎました。つづきから やれます」と 短く 伝える。"
+        "(3)つかい手に「引きつぎました。つづきから やれます%s」と 短く 伝える。"
         "%s"
-        % (d.get("name"), d.get("name"), d.get("file") or "（引きつぎの ファイル）", tail)
+        % (d.get("name"), d.get("name"), d.get("file") or "（引きつぎの ファイル）", phone, tail)
     )
 
 
@@ -526,28 +579,39 @@ def weak_note(sid):
     # 呼び名は この工房の せってい（つかい手が 入れたもの）を 使う。
     # 決めうちに すると、ほかの人の 工房で 知らない名まえが 出てしまう
     who = USER_NAME or "つかい手"
+    marks = "／".join(SPARE_MARKS[:3])
+    # つかい手は「OK」と 返すだけ。部屋の 切りかえは させない（スマホで 部屋を さがすのが 手間）。
+    # 空き部屋は この部屋の Claude が 自分で 起こす
     return (
         "[この部屋の おもさ] 会話%d件 / %.1fMB ／ もう おもい（目安の%.0f%%）。"
         "この部屋は そのうち 返事が 返らなくなる。"
         "いま 手をつけている ことが 一区切りついたら、"
-        "『この部屋、そろそろ 新しくしよう』と %sに 一言 出すこと。"
-        "同意が とれたら、"
+        "『この部屋、そろそろ 新しくしよう。OKなら「OK」とだけ 返してね』と %sに 一言 出すこと。"
+        "OKが 出たら、%sには もう 何も させない（部屋の 切りかえも いらない）。こちらで ぜんぶ やる："
         "(1)これまでの 経緯・判断・やり残しを 省かずに 書き出して、"
         "ファイルに 保存する（作業フォルダに 引きつぎ_<セッション名>.md）"
         "(2)つぎの ファイルを 書く（Write で そのまま 作る）。"
         "置き場： %s ／ 中身は "
         "{\"name\": \"いまの セッション名\", \"file\": \"いま 書いた 引きつぎファイルの 道すじ\"} "
-        "(3)%sに つぎのように 伝える。"
-        "空き部屋（名まえが「%s」などで はじまる 部屋）が あれば"
-        "「その部屋を ひらいて 一言 打ってください。あとは こちらで 引きつぎます」、"
-        "無ければ「新しい部屋を ひとつ 作ってください」。"
-        "⚠️ 出先の 遠あやつりでは 新しい部屋を 作れないので、"
-        "空き部屋が ある時は かならず そちらを 案内すること"
-        "(4)新しい部屋が 引きついだら この部屋にも 知らせが 来るので、"
-        "そこで archive_session(\"self\") で 閉じる。"
+        "(3)空き部屋を 自分で 起こす。ToolSearch で "
+        "select:mcp__ccd_session_mgmt__list_sessions,mcp__ccd_session_mgmt__send_message を 読み込み、"
+        "list_sessions で 名まえが「%s」などで はじまる 部屋（アーカイブされていない もの）を 1つ えらぶ。"
+        "send_message(session_id=その部屋, message=…) で つぎを 送る："
+        "「あなたは『<いまの名まえ>』の あとつぎです。"
+        "①set_session_title で この部屋の 名まえを『<いまの名まえ>』に する "
+        "②<引きつぎファイルの 道すじ> を 読んで 引きつぐ "
+        "③list_sessions で 名まえが『<いまの名まえ>』の もう1つの 部屋（もとの部屋）を さがし、"
+        "archive_session で 閉じる（止められたら 無理に しない） "
+        "④%sに「引きついだよ。スマホでは まだ『<空き部屋の名まえ>』と 見えるかも。"
+        "長押しで『<いまの名まえ>』に 変えてね」と 短く 伝える」"
+        "(4)送れたら %sに「新しい部屋に 引きついだよ。つぎからは『<いまの名まえ>』で 話してね」と 一言。"
+        "空き部屋が 無い時だけ「パソコンの 前に 来たら、名まえを『%s1』に した 空の 部屋を 作っておいて」と 伝える"
+        "（出先の 遠あやつりでは 新しい部屋を 作れないため）"
+        "(5)この部屋は、あとつぎが 閉じるか、工房から「もう閉じていい」と 知らせが 来たら "
+        "archive_session(\"self\") で 閉じる。どちらも 止められたら %sに「この部屋を 閉じておいて」と 一言。"
         "作業の 途中では 言わない。急かさない。1回 言って 断られたら もう 言わない。"
-        % (h["msgs"], h["mb"], h["weight"] * 100, who,
-           HANDOVER.replace("\\", "/"), who, "／".join(SPARE_MARKS[:3]))
+        % (h["msgs"], h["mb"], h["weight"] * 100, who, who,
+           HANDOVER.replace("\\", "/"), marks, who, who, SPARE_MARKS[0], who)
     )
 
 
@@ -769,7 +833,7 @@ def snapshot():
             return 3        # まだ 生きている
         return 4            # おわった子。押し出されるのは この子から
     out.sort(key=lambda x: (rank(x), x["idle"]))
-    todo = read_todo()
+    todo = rename_todos() + read_todo()
     # 空き部屋が 尽きていて、引っこしを 待っている 時だけ 出す。
     # つかい手の 台帳には 書きこまない（勝手に 足すと じゃまに なる）
     spare = spare_ids()
@@ -1447,6 +1511,8 @@ def done_todo(tid):
     """その行の チェックを 付ける（消さずに 残す）"""
     if not tid:
         return False
+    if tid.startswith("rename-"):
+        return done_rename(tid)
     try:
         with open(TODO_FILE, "r", encoding="utf-8") as f:
             text = f.read()

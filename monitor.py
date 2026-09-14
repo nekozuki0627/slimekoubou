@@ -524,12 +524,37 @@ def hand_note(sid):
     waiting = [d for d in rows if not d.get("taken_by")]
     if not waiting:
         return None
+
+    # /clear（clear_session）で 会話だけ まっさらにした 同じ部屋も あとつぎ。
+    # 名まえは そのまま・会話は まだ 少ない。つかい手は 新しい部屋を 作らなくて いい
+    same = [x for x in waiting if mine and _same_name(mine, x.get("name"))]
+    if same:
+        with _lock:
+            path0 = ((_sessions.get(sid) or {}).get("transcript"))
+        if (weigh(path0) or {}).get("msgs", 0) <= 40:
+            d = same[0]
+            d["taken_by"] = sid
+            d["at_taken"] = time.time()
+            d["from_name"] = mine
+            d["renamed"] = True
+            save_handover(d)
+            return ("[引きつぎ] この部屋は 会話を まっさらにして『%s』を 続けています。"
+                    "%s を 読んで、これまでの 経緯・判断・やり残し・つぎに やることを 引きつぐ。"
+                    "つかい手に「引きついだよ。つづきから やれます」と 短く 伝えてから 続ける。"
+                    "（名まえの 変更も、もとの部屋を 閉じるのも いらない）"
+                    % (d.get("name"), d.get("file") or "（引きつぎの ファイル）"))
+
     d = waiting[0]
 
     # あとつぎに なれるのは
     #   ・空き部屋（よび◯）… 出先からでも これを ひらいて 一言 打てば 引きつげる
     #   ・立ったばかりの 部屋（名まえも 会話も まだ）… パソコンの 前に いる時
-    if not (is_spare(mine) or not mine):
+    # あとつぎに なれるのは 空き部屋（よび◯）だけ。
+    # ⚠️「名まえの まだ 無い 立ったばかりの 部屋」も 前は あとつぎに していたが、
+    #   時間で 自動に 立つ 部屋（毎朝の 体重・週報 など）が 名まえの 付く 前に 話しかけてきて
+    #   引きつぎを 横取りする 事故が 2回 起きた（2026-09-14）。自動の 部屋も 素性は "interactive" で 見わけられない。
+    #   正式手順では つかい手が 新しい 部屋を 作ることは ないので、この 入口は 閉じる
+    if not is_spare(mine):
         return None
     with _lock:
         path = ((_sessions.get(sid) or {}).get("transcript"))
@@ -551,7 +576,7 @@ def hand_note(sid):
     tail = ("(4)引きつぎを 読み終えたら、もとの部屋を 閉じる。ToolSearch で "
             "select:mcp__ccd_session_mgmt__list_sessions,mcp__ccd_session_mgmt__archive_session を 読み込み、"
             "list_sessions で 名まえが『%s』の もう1つの 部屋を さがして archive_session で 閉じる"
-            "（止められたら 無理に しない。つかい手に「もとの部屋を 閉じておいて」と 一言）。" % d.get("name"))
+            "（止められたら 無理に しない。つかい手には 頼まない。部屋を 整理する 役の Claude が あとで 畳む）。" % d.get("name"))
     phone = ("。スマホでは まだ『%s』と 見えるかも。長押しで『%s』に 変えてね" % (mine, d.get("name"))) if mine else ""
     return (
         "[引きつぎ] この部屋は『%s』の あとつぎです。つぎの 順で 引きついでください。"
@@ -593,25 +618,35 @@ def weak_note(sid):
         "(2)つぎの ファイルを 書く（Write で そのまま 作る）。"
         "置き場： %s ／ 中身は "
         "{\"name\": \"いまの セッション名\", \"file\": \"いま 書いた 引きつぎファイルの 道すじ\"} "
-        "(3)空き部屋を 自分で 起こす。ToolSearch で "
+        "(3)引っこし先を 決める。"
+        "A：スマホの 遠あやつりで 使っていない 部屋なら、会話だけ まっさらに する。ToolSearch で "
+        "select:mcp__ccd_session_mgmt__clear_session を 読み込み、clear_session(session_id=\"self\") を 呼ぶ。"
+        "呼べたら %sに「つぎの 一言から、軽くなった 部屋で つづきを やるよ（名まえは そのまま）」と 伝えて 返事を おえる"
+        "（つぎの 一言で 工房が 引きつぎを 読ませる）。A で すんだら ここで おわり。"
+        "B：遠あやつりで 使う 部屋、または A が 止められた 時は、空き部屋「%s」へ。"
+        "⚠️ 遠あやつりで 使う 部屋の 引っこし先は、つかい手が パソコンで 作った 空き部屋だけ"
+        "（定期タスクで 作った 部屋は スマホの 一覧に 出ず、出先から 話しかけられない。2026-09-14 確認）。"
+        "それが 無ければ、つかい手に「パソコンの 前に 来たら『よび◯』を 1つ 作っておいて」と 一言 だけ 伝え、引っこしは そのとき まで 待つ。"
+        "パソコンだけで 使う 部屋なら、空き部屋が 無ければ 作ってよい：ToolSearch で select:mcp__scheduled-tasks__list_scheduled_tasks,"
+        "mcp__scheduled-tasks__create_scheduled_task,mcp__scheduled-tasks__run_scheduled_task を 読み込み、"
+        "taskId『yobi-heya』（title『よび（空き部屋をつくる）』・手動のみ・中身は「空き部屋です、とだけ返して終える」）が 無ければ 作り、"
+        "run_scheduled_task で 実行する（新しい 部屋が 1つ できる）。そのあと ToolSearch で "
         "select:mcp__ccd_session_mgmt__list_sessions,mcp__ccd_session_mgmt__send_message を 読み込み、"
-        "list_sessions で 名まえが「%s」などで はじまる 部屋（アーカイブされていない もの）を 1つ えらぶ。"
-        "send_message(session_id=その部屋, message=…) で つぎを 送る："
+        "list_sessions で 名まえが 空き部屋の 目じるしで はじまる 部屋（アーカイブされていない もの）を 1つ えらび、"
+        "send_message(session_id=その部屋の local_… 番号, message=…) で つぎを 送る："
         "「あなたは『<いまの名まえ>』の あとつぎです。"
         "①set_session_title で この部屋の 名まえを『<いまの名まえ>』に する "
         "②<引きつぎファイルの 道すじ> を 読んで 引きつぐ "
-        "③list_sessions で 名まえが『<いまの名まえ>』の もう1つの 部屋（もとの部屋）を さがし、"
-        "archive_session で 閉じる（止められたら 無理に しない） "
+        "③list_sessions で 名まえが『<いまの名まえ>』の もう1つの 部屋（もとの部屋）を さがし、アプリ側の 番号（local_…）で "
+        "archive_session する（止められたら 無理に しない。つかい手には 頼まない。部屋を 整理する 役の Claude が あとで 畳む） "
         "④%sに「引きついだよ。スマホでは まだ『<空き部屋の名まえ>』と 見えるかも。"
         "長押しで『<いまの名まえ>』に 変えてね」と 短く 伝える」"
-        "(4)送れたら %sに「新しい部屋に 引きついだよ。つぎからは『<いまの名まえ>』で 話してね」と 一言。"
-        "空き部屋が 無い時だけ「パソコンの 前に 来たら、名まえを『%s1』に した 空の 部屋を 作っておいて」と 伝える"
-        "（出先の 遠あやつりでは 新しい部屋を 作れないため）"
-        "(5)この部屋は、あとつぎが 閉じるか、工房から「もう閉じていい」と 知らせが 来たら "
-        "archive_session(\"self\") で 閉じる。どちらも 止められたら %sに「この部屋を 閉じておいて」と 一言。"
+        "(4)送れたら %sに「『<いまの名まえ>』の 引っこし先は『<空き部屋の名まえ>』。つぎからは そっちで 話してね」と 一言。"
+        "(5)この部屋は あとつぎが 閉じる。工房から「もう閉じていい」と 知らせが 来たら archive_session(\"self\") で 閉じる。"
+        "止められたら 無理に しない（つかい手に「閉じて」とは 頼まない。部屋を 整理する 役の Claude が あとで 畳む）。"
         "作業の 途中では 言わない。急かさない。1回 言って 断られたら もう 言わない。"
         % (h["msgs"], h["mb"], h["weight"] * 100, who, who,
-           HANDOVER.replace("\\", "/"), marks, who, who, SPARE_MARKS[0], who)
+           HANDOVER.replace("\\", "/"), who, "／".join(SPARE_MARKS[:3]), who, who)
     )
 
 
@@ -834,18 +869,8 @@ def snapshot():
         return 4            # おわった子。押し出されるのは この子から
     out.sort(key=lambda x: (rank(x), x["idle"]))
     todo = rename_todos() + read_todo()
-    # 空き部屋が 尽きていて、引っこしを 待っている 時だけ 出す。
-    # つかい手の 台帳には 書きこまない（勝手に 足すと じゃまに なる）
+    # 空き部屋は トバが 定期タスク yobi-heya で 作るので、つかい手に「作って」とは 出さない（2026-09-14 正式手順）
     spare = spare_ids()
-    waiting = [x for x in all_handovers() if not x.get("taken_by")]
-    if waiting and len(spare) < len(waiting):
-        names = "・".join(x.get("name") or "" for x in waiting[:3])
-        todo = [{"id": "spare", "session": (waiting[0].get("name") or ""),
-                 "title": "空き部屋を %d つ 作る（名まえを「%s1」などに）。"
-                          "引っこし先を まっている：%s"
-                          % (len(waiting) - len(spare), SPARE_MARKS[0], names),
-                 "why": "出先からは 新しい部屋を 作れないため",
-                 "url": ""}] + todo
     return {"sessions": out, "total": len(out), "rev": page_rev(),
             "soon": next_task(), "spare": len(spare),
             "todo": [{"id": t.get("id"), "title": t.get("title", ""),
@@ -1319,6 +1344,10 @@ def is_auto_session(sid, name):
     まず 素性で 見わける（どの人でも 使える）。
     素性が わからない ぶんは 名まえで 見わける（こちらは 目やす）
     """
+    # 引っこしの あとつぎに なった 部屋・空き部屋は、自動で 立っていても 人の 部屋として 出す
+    # （空き部屋は 定期タスクの「今すぐ実行」で 作ることが あるため）
+    if is_spare(name) or any(sid == d.get("taken_by") for d in _load_list()):
+        return False
     bridge_ids()                      # _KIND を ためておく
     k = _KIND.get(sid)
     if k and k[0] and k[0] not in HUMAN_KINDS:

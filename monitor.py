@@ -50,9 +50,10 @@ SAY_HOLD = 25.0
 # 会話の数と 大きさの どちらか 重い方で 見る
 #（絵や 長い道具の返事が 多いと、会話が 少なくても 重くなるため）
 # いちばん 早く 返らなくなった 部屋は 1,933会話 だった。
-# その 手前で 知らせたいので、1,500会話 を 上限に する
-WEIGHT_MSGS = 1500
-WEIGHT_BYTES = 52 * 1024 * 1024
+# その 手前で 知らせたいので、1,500会話 を 上限に していたが、
+# 2026-09-14 つかい手「移行が早い」→ 会話2,000件・50MB を こえても ふつうに 返事していたので 3,000会話 / 80MB に 上げた
+WEIGHT_MSGS = 3000
+WEIGHT_BYTES = 80 * 1024 * 1024
 # 名札に出す 呼び名の長さの上限
 TAG_MAX = 8
 
@@ -487,7 +488,7 @@ def _sid_named(name, but=None):
     return None
 
 
-def hand_note(sid):
+def hand_note(sid, prompt=""):
     """
     引きつぎの 覚え書きが あれば、その ぶんの 耳うちを 返す。
     ・空き部屋 / 立ったばかりの 部屋 … あとを つぐ ための 手順
@@ -522,6 +523,14 @@ def hand_note(sid):
 
     # あとつぎを さがしている ぶん（古い順に 1件）
     waiting = [d for d in rows if not d.get("taken_by")]
+    if not waiting:
+        return None
+    # 呼び出しの 本文に「『◯◯』の あとつぎ」と 名ざしが あれば、その 部屋の 引きつぎだけを 渡す。
+    # 名ざしが 無い 時は 割りふらない（空き部屋が 何部屋も 同時に 起こされると、古い順で 取りちがえる。2026-09-11・09-14 に 起きた）
+    m = re.search(r"『([^』]+)』の\s*あとつぎ", prompt or "")
+    if not m:
+        return None
+    waiting = [x for x in waiting if _same_name(x.get("name"), m.group(1))]
     if not waiting:
         return None
 
@@ -872,12 +881,93 @@ def snapshot():
     # 空き部屋は トバが 定期タスク yobi-heya で 作るので、つかい手に「作って」とは 出さない（2026-09-14 正式手順）
     spare = spare_ids()
     return {"sessions": out, "total": len(out), "rev": page_rev(),
+            "widget": widget_version(),
             "soon": next_task(), "spare": len(spare),
             "todo": [{"id": t.get("id"), "title": t.get("title", ""),
                       "session": t.get("session", ""),
                       "tag": first_word(t.get("session", "")),
                       "why": t.get("why", ""),
                       "url": t.get("url", "")} for t in todo]}
+
+
+WIDGET_JS = os.path.join(HERE, "iphone", "slime_widget.js")
+
+
+def widget_version():
+    """iPhone ウィジェットの 台本の 版。ウィジェットが 自分より 新しければ「新しい版あり」と 出す"""
+    try:
+        with open(WIDGET_JS, encoding="utf-8") as f:
+            m = re.search(r"^const VERSION = (\d+)", f.read(), re.M)
+        return int(m.group(1)) if m else 0
+    except OSError:
+        return 0
+
+
+def iphone_page(host, key):
+    """
+    iPhone の Safari で ひらく 案内。台本に 住所と 合言葉を 入れた 状態で コピーできる。
+    合言葉を 知っている 人にしか 出さない（呼ぶ側で _allowed を 通す）
+    """
+    import html as _h
+    try:
+        with open(WIDGET_JS, encoding="utf-8") as f:
+            js = f.read()
+    except OSError:
+        js = "// 台本が 見つかりません（iphone/slime_widget.js）"
+    js = js.replace('"__HOST__"', json.dumps(host)).replace('"__KEY__"', json.dumps(key))
+    return """<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iPhone で 見る ─ スライムこうぼう</title>
+<style>
+body{margin:0;padding:20px 16px 40px;font:15px/1.7 -apple-system,system-ui,sans-serif;background:#FFF8EE;color:#3A3A3A}
+h1{font-size:20px;margin:0 0 12px}h2{font-size:16px;margin:24px 0 6px}
+ol{padding-left:1.3em;margin:6px 0}li{margin:4px 0}
+.btn{display:block;width:100%;padding:14px;margin:12px 0;border:0;border-radius:12px;background:#6DBE5A;color:#fff;font-size:17px;font-weight:700}
+.note{font-size:13px;color:#8A8378}
+textarea{width:100%;height:140px;font:11px monospace;border:1px dashed #ccc;border-radius:8px;box-sizing:border-box}
+a{color:#3E8ED0}
+</style></head><body>
+<h1>🟢 iPhone で スライムを 見る</h1>
+<p>ロック画面や ホーム画面に「きょかまち」が 出しっぱなしに なる ウィジェットです。</p>
+
+<h2>1. アプリを 入れる（無料）</h2>
+<ol>
+<li><a href="https://apps.apple.com/app/scriptable/id1405459188">Scriptable</a> を App Store から入れる</li>
+<li>Tailscale も 入れて、PC と 同じ アカウントで ログイン（外出先で 見るのに 必要）</li>
+</ol>
+
+<h2>2. 台本を 貼る</h2>
+<button class="btn" id="copy">台本を コピーする</button>
+<ol>
+<li>Scriptable を ひらいて 右上の ＋</li>
+<li>まっしろな 所を 長押し →「ペースト」</li>
+<li>上の 名前を「スライムこうぼう」に して「Done」</li>
+<li>▶ を 押して 見本が 出れば OK</li>
+</ol>
+<p class="note">この台本には この PC の 住所と 合言葉が 入っています。ほかの人には 渡さないでください。</p>
+
+<h2>3. ウィジェットを 置く</h2>
+<ol>
+<li>ホーム画面 or ロック画面を 長押し →「編集」→ ウィジェットを 追加</li>
+<li>Scriptable を えらぶ（ロック画面は 横長が おすすめ）</li>
+<li>置いた ウィジェットを タップ → Script で「スライムこうぼう」を えらぶ</li>
+</ol>
+<p class="note">iPhone の ウィジェットは iOS の つごうで 数分〜15分おきに 書きかわります（すぐには 変わりません）。
+いますぐ 見たい時は ウィジェットを タップすると 工房の 画面が ひらきます。</p>
+
+<h2>おまけ：工房の 画面を ホーム画面に 置く</h2>
+<p>いまの Safari で 工房の 画面を ひらいて、共有ボタン →「ホーム画面に追加」。スライムが 動く 部屋を アプリのように ひらけます。</p>
+
+<textarea id="js" readonly>""" + _h.escape(js) + """</textarea>
+<script>
+document.getElementById('copy').onclick = async function () {
+  var ta = document.getElementById('js');
+  try { await navigator.clipboard.writeText(ta.value); }
+  catch (e) { ta.focus(); ta.select(); document.execCommand('copy'); }
+  this.textContent = 'コピーしました ✓';
+};
+</script>
+</body></html>"""
 
 
 def page_rev():
@@ -1041,7 +1131,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             try:
                 sid0 = payload.get("session_id")
-                note = hand_note(sid0) or weak_note(sid0)
+                note = hand_note(sid0, payload.get("prompt") or "") or weak_note(sid0)
                 if note:
                     return self._send(200, json.dumps(
                         {"hookSpecificOutput": {
@@ -1087,6 +1177,16 @@ class Handler(BaseHTTPRequestHandler):
                 out["share"] = SHARE
                 out["show"] = SHOW
             return self._send(200, json.dumps(out, ensure_ascii=False))
+        if path == "/iphone":
+            # 合言葉つきで 来た 人にだけ、住所と 合言葉を 入れた 台本を わたす
+            if not self._allowed():
+                return
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
+            if not host or host in ("127.0.0.1", "localhost", "::1"):
+                host = phone_ip()
+            key = TOKEN
+            self._note("iPhone の 案内を 見せた")
+            return self._send(200, iphone_page(host, key), "text/html; charset=utf-8")
         if path == "/pair":
             from urllib.parse import parse_qs as _pq2
             q2 = _pq2(urlparse(self.path).query)
@@ -1115,6 +1215,10 @@ class Handler(BaseHTTPRequestHandler):
         target = os.path.abspath(os.path.join(HERE, rel))
         if not target.startswith(HERE) or not os.path.isfile(target):
             return self._send(404, "not found", "text/plain; charset=utf-8")
+        if not self._local() and not public_file(rel):
+            # 設定（合言葉入り）・控え・台本などは このPCの中にだけ 見せる
+            self._note("ことわった（PCの中だけの ファイル）")
+            return self._send(404, "not found", "text/plain; charset=utf-8")
         ctype = mimetypes.guess_type(target)[0] or "application/octet-stream"
         # Windows は .js を text/plain と答えることがあり、それだと
         # ホーム画面アプリの係（sw.js）が動かない。ここで直しておく
@@ -1140,6 +1244,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, f.read(), ctype)
         except FileNotFoundError:
             self._send(404, name + " not found", "text/plain; charset=utf-8")
+
+
+# ほかの機械（スマホ）に わたして いい ファイル。画面を 描くのに 要る ものだけ
+PUBLIC_EXT = (".png", ".webp", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+              ".js", ".css", ".apk")
+PUBLIC_NAMES = ("manifest.json",)
+
+
+def public_file(rel):
+    """
+    スマホから 取りに 来ても いい ファイルか。
+    _config.json（合言葉）・_state.json・_access.log・*.py などは わたさない。
+    「_」や「.」で はじまる ファイル／フォルダの 中身は 絵でも わたさない
+    """
+    parts = [p for p in rel.replace("\\", "/").split("/") if p]
+    if not parts or any(p.startswith(("_", ".")) for p in parts):
+        return False
+    name = parts[-1].lower()
+    return name in PUBLIC_NAMES or name.endswith(PUBLIC_EXT)
 
 
 def lan_ip():

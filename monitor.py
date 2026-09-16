@@ -1471,12 +1471,52 @@ def is_auto_session(sid, name):
     # （空き部屋は 定期タスクの「今すぐ実行」で 作ることが あるため）
     if is_spare(name) or any(sid == d.get("taken_by") for d in _load_list()):
         return False
+    if is_routine(sid):
+        return True
     bridge_ids()                      # _KIND を ためておく
     k = _KIND.get(sid)
     if k and k[0] and k[0] not in HUMAN_KINDS:
         note_kind(sid, name)
         return True
     return is_task_session(name)
+
+
+_ROUTINE = {}       # sessionId → True/False（一度 分かったら 変わらない）
+
+
+def is_routine(sid):
+    """
+    ルーティン（定期タスク）が 立てた 会話か。
+    ルーティンの 会話は、最初の ことばが かならず <scheduled-task …> で 包まれて いる。
+    名まえや 素性（kind は ふつうの 会話と 同じ interactive）では 見わけられないので、会話の 中身で 見る。
+    2026-09-15 つかい手「表示するのは セッションだけで、ルーティンは 出したくない」
+    """
+    if sid in _ROUTINE:
+        return _ROUTINE[sid]
+    path = (_sessions.get(sid) or {}).get("transcript")
+    if not path:
+        return False
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if i > 40:
+                    break
+                if '"type":"user"' not in line:
+                    continue
+                try:
+                    msg = json.loads(line).get("message") or {}
+                except Exception:
+                    continue
+                c = msg.get("content")
+                if isinstance(c, list):
+                    c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
+                if not isinstance(c, str):
+                    continue
+                _ROUTINE[sid] = c.lstrip().startswith("<scheduled-task")
+                return _ROUTINE[sid]
+    except OSError:
+        pass
+    return False              # まだ 最初の ことばが 無い。つぎに また 見る
 
 
 def is_task_session(name):

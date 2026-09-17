@@ -1081,7 +1081,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             from urllib.parse import parse_qs as _pq
             tid = (_pq(u.query).get("id") or [""])[0]
-            ok = done_todo(tid)
+            ok = done_todo(tid, "PC" if self._local() else "スマホ")
             return self._send(200 if ok else 404, json.dumps({"ok": ok}))
         # 工房の 中身を 書きかえる ところ。このPCの中からだけ
         if u.path == "/api/config":
@@ -1587,6 +1587,9 @@ def next_task():
 # 人によって 台帳の 置き場は ちがうので、決めうちに しない
 TODO_FILE = os.path.join(HERE, "todo.md")
 TODO_MARK = "@me"
+# チェックした やり残しを 書きのこす ファイル（無ければ 書かない）。
+# Claude Code の 各部屋が「もう 済んだ」と 分かるように する
+DONE_LOG = ""
 # ── 空き部屋（よび）──
 # 出先の 遠あやつりでは、新しい 部屋を 作れない。
 # そこで あらかじめ 空の部屋を いくつか 作っておき、
@@ -1616,7 +1619,7 @@ TOKEN = ""              # 合言葉
 
 
 def load_config():
-    global TODO_FILE, TODO_MARK, USER_NAME, SHARE, SHOW, TOKEN, SPARE_MARKS
+    global TODO_FILE, TODO_MARK, DONE_LOG, USER_NAME, SHARE, SHOW, TOKEN, SPARE_MARKS
     d = {}
     try:
         with open(CONFIG, "r", encoding="utf-8") as f:
@@ -1625,6 +1628,7 @@ def load_config():
         d = {}
     TODO_FILE = os.path.expanduser(d.get("todo_file") or TODO_FILE)
     TODO_MARK = d.get("todo_mark") or TODO_MARK
+    DONE_LOG = os.path.expanduser(d.get("done_log") or "")
     m = d.get("spare_mark")
     if isinstance(m, str) and m.strip():
         SPARE_MARKS = [m.strip()]
@@ -1699,8 +1703,12 @@ def read_todo():
     return out
 
 
-def done_todo(tid):
-    """その行の チェックを 付ける（消さずに 残す）"""
+def done_todo(tid, where="PC"):
+    """
+    その行の チェックを 付ける（消さずに 残す）。
+    いつ・どこで 済んだかを 行末に 書き足し、済んだことログにも 1行 のこす。
+    2026-09-16 つかい手「チェックを 入れたら 終了に したい。終了だと Claude Code 側にも 把握して ほしい」
+    """
     if not tid:
         return False
     if tid.startswith("rename-"):
@@ -1718,8 +1726,10 @@ def done_todo(tid):
             continue
         if _todo_id(m.group(2)) != tid:
             continue
-        lines[i] = line.replace("[ ]", "[x]", 1)
-        hit = True
+        stamp = time.strftime("%Y/%m/%d %H:%M").replace("/0", "/")
+        cr = "\r" if line.endswith("\r") else ""
+        lines[i] = line.replace("[ ]", "[x]", 1).rstrip() + " ← **%s %sでチェック（済み）**" % (stamp, where) + cr
+        hit = m.group(2)
         break
     if not hit:
         return False
@@ -1728,9 +1738,49 @@ def done_todo(tid):
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines))
         os.replace(tmp, TODO_FILE)
-        return True
     except Exception:
         return False
+    log_done(hit, where)
+    return True
+
+
+_WEEK = "月火水木金土日"
+
+
+def log_done(body, where):
+    """済んだことログの 今日の 見出しの すぐ下に 1行 足す（新しいものが 上）"""
+    if not DONE_LOG:
+        return
+    title = body.replace(TODO_MARK, "").strip()
+    tag = ""
+    # 「… #ボイストランド — 補足」のように タグの うしろに 補足が 続く 行も あるので、
+    # 最初の #タグ を 部屋の名まえに して、そこから うしろは ログに 入れない
+    mt = re.search(r"(?:^|\s)#([^\s#]+)", title)
+    if mt:
+        tag = mt.group(1)
+        title = title[:mt.start()].strip()
+    t = time.localtime()
+    head = "## %s（%s）" % (time.strftime("%Y-%m-%d", t), _WEEK[t.tm_wday])
+    row = "- `%s` **#%s** ✅ %sで完了チェック（本人）：%s ／ 台帳は [x] 済み" % (
+        time.strftime("%H:%M", t), tag or "タスク", where, title)
+    try:
+        with open(DONE_LOG, "r", encoding="utf-8") as f:
+            lines = f.read().split("\n")
+    except Exception:
+        return
+    try:
+        if head in lines:
+            lines.insert(lines.index(head) + 1, row)
+        else:
+            # 最初の 日付見出しの 前（無ければ 末尾）に 今日の 見出しを 作る
+            at = next((i for i, x in enumerate(lines) if x.startswith("## 20")), len(lines))
+            lines[at:at] = [head, row, ""]
+        tmp = DONE_LOG + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(lines))
+        os.replace(tmp, DONE_LOG)
+    except Exception:
+        pass
 
 
 def ts_ip():

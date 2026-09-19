@@ -96,6 +96,14 @@
   .legend.todo .row.head:hover{background:rgba(246,236,252,.98)}
   .legend.todo .head .mark{flex:none;color:#8a3ea8;font-size:11px;width:12px;
     text-align:center}
+  /* 部屋ごとの 小見出しと、その中の 行（すこし 字下げ） */
+  .legend.todo .row.sub{margin-left:10px;font-weight:700}
+  .legend.todo .row.sub .mark{flex:none;color:#8a3ea8;font-size:11px;width:12px;text-align:center}
+  .legend.todo .row.urgent .nm{color:#c0392b}
+  .legend.todo .row.item{margin-left:22px}
+  .legend.todo .brk{flex-basis:100%;height:0}
+  .legend.todo .row.note{margin-left:10px;color:#6f5a7c;font-size:12px;
+    background:rgba(255,255,255,.9);white-space:normal}
   /* 細い画面では 部屋をなるべく大きく見せたい。
      一覧は 折り返さず1行にして、はみ出すぶんは 横になぞって読む */
   @media (max-width: 560px){
@@ -2125,16 +2133,79 @@
     head.append(mark, hdot, hnm, hst);
     head.onclick = ()=>{ todoOpen = !todoOpen; renderTodo(items); };
     box.appendChild(head);
+    if(todoNote){
+      const nt = document.createElement("div");
+      nt.className = "row note"; nt.textContent = todoNote;
+      box.appendChild(nt);
+    }
     if(!todoOpen) return;
 
-    items.forEach(t=>{
-      const row = document.createElement("div"); row.className = "row";
+    // 2026-09-18 スマホの 一覧と そろえた 見せかた
+    //  ・🔴 いそぎ は 部屋を またいで いちばん上に ひらいて 出す（部屋名の 札つき）
+    //  ・のこりは 部屋ごとに まとめ、小見出しを 押すと ひらく（はじめは たたむ）
+    // 一覧は 横に 流れる 作りなので、まとまりの 前後で 行を 切る
+    const brk = ()=>{ const b = document.createElement("div"); b.className = "brk"; box.appendChild(b); };
+    const urgent = items.filter(t => (t.title || "").includes("🔴"));
+    if(urgent.length){
+      brk();
+      box.appendChild(subHead("🔴 いそぎ", urgent.length, null, true));
+      urgent.forEach(t => box.appendChild(todoRow(t, true)));
+      brk();
+    }
+    const groups = new Map();
+    items.filter(t => !(t.title || "").includes("🔴")).forEach(t=>{
+      const r = todoRoom(t);
+      if(!groups.has(r)) groups.set(r, []);
+      groups.get(r).push(t);
+    });
+    Array.from(groups.entries())
+      .sort((a, b)=> (a[0] === TODO_OTHER) - (b[0] === TODO_OTHER) || b[1].length - a[1].length)
+      .forEach(([room, rows])=>{
+        const open = todoRoomsOpen.has(room);
+        if(open) brk();            // ひらいた 部屋は 行を 分けて、中身が ほかと まざらないように
+        box.appendChild(subHead(room, rows.length, ()=>{
+          if(open) todoRoomsOpen.delete(room); else todoRoomsOpen.add(room);
+          renderTodo(items);
+        }, open));
+        if(open){ rows.forEach(t => box.appendChild(todoRow(t, false))); brk(); }
+      });
+
+    function subHead(label, n, onTap, open){
+      const h = document.createElement("div");
+      h.className = "row sub" + (onTap ? " head" : " urgent");
+      const mk = document.createElement("span");
+      mk.className = "mark"; mk.textContent = onTap ? (open ? "▼" : "▶") : "";
+      const nm = document.createElement("span");
+      nm.className = "nm"; nm.textContent = label;
+      const st = document.createElement("span");
+      st.className = "st"; st.textContent = n + "件";
+      h.append(mk, nm, st);
+      if(onTap) h.onclick = onTap;
+      return h;
+    }
+
+    function todoRow(t, showRoom){
+      const room = todoRoom(t);
+      const row = document.createElement("div"); row.className = "row item";
       const btn = document.createElement("button");
       btn.className = "done"; btn.type = "button";
       btn.textContent = "✓"; btn.title = "おわった";
-      btn.onclick = ()=>{
+      btn.onclick = (ev)=>{
+        ev.stopPropagation();
+        const label = todoText(t, room);
+        if(!confirm("終わった？\n\n" + label + "\n\n「済み」にすると、台帳に チェックが 付き、済んだことログにも のこります。")) return;
         ask("api/todo/done?id=" + encodeURIComponent(t.id), {method:"POST"})
-          .then(()=> poll());
+          .then(r=>{
+            todoNote = r.ok ? "済みにしました ✓"
+              : r.status === 404 ? "その用件は、ちょうど 台帳が 書きかわったか、もう 済みに なっていました。最新の 一覧に したので、もう一度 さがしてね"
+              : "工房に 伝えられませんでした。もう一度 ためしてね";
+          })
+          .catch(()=>{ todoNote = "工房に 伝えられませんでした。もう一度 ためしてね"; })
+          .then(()=>{
+            poll();
+            const said = todoNote;     // 8秒たったら ひとことを 片づける
+            setTimeout(()=>{ if(todoNote === said){ todoNote = ""; renderTodo(lastRaw ? lastRaw.todo : null); } }, 8000);
+          });
       };
       // どの スライムの しごとか、色の丸で 結びつける
       const sl = t.tag ? Array.from(bySession.values()).find(x => x.tagTxt
@@ -2143,16 +2214,36 @@
       dot.className = "dot";
       dot.style.background = sl ? hueSwatch(sl.hueIdx) : "#c9c2d4";
       const nm = document.createElement("span");
-      nm.className = "nm"; nm.textContent = t.title || "";
-      if(t.why) nm.title = t.why;
+      nm.className = "nm"; nm.textContent = todoText(t, room);
+      nm.title = (t.title || "") + (t.why ? "\n" + t.why : "");
       row.append(btn, dot, nm);
-      if(t.session){
+      if(showRoom && room !== TODO_OTHER){
         const st = document.createElement("span");
-        st.className = "st"; st.textContent = t.session;
+        st.className = "st"; st.textContent = room;
         row.appendChild(st);
       }
-      box.appendChild(row);
-    });
+      return row;
+    }
+  }
+
+  const TODO_OTHER = "そのほか";
+  const todoRoomsOpen = new Set();   // ひらいている 部屋（画面を ひらいている あいだだけ）
+  let todoNote = "";                 // ✓の あとの ひとこと
+
+  /** どの部屋の 用件か。行頭の【◯◯の部屋の話】→ 台帳の #タグ → そのほか */
+  function todoRoom(t){
+    const m = /【(.+?)の部屋の話】/.exec(t.title || "");
+    if(m) return m[1];
+    return t.session || TODO_OTHER;
+  }
+
+  /** 出す 文。見出しと かぶる【◯◯の部屋の話】と #部屋タグ、太字の ** を はずす */
+  function todoText(t, room){
+    const esc = room.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return (t.title || "").replace(/\*\*/g, "")
+      .replace(/^【.+?の部屋の話】\s*/, "")
+      .replace(new RegExp("\\s*#" + esc + "(?=\\s|$)"), "")
+      .trim();
   }
 
   function renderLegend(visible){

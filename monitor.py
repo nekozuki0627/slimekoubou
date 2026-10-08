@@ -800,9 +800,39 @@ def on_hook(event, payload):
             s["waiting_at"] = now
 
 
+def adopt_live():
+    """
+    いま ひらいている 部屋を、まだ 一言も 話していなくても 住人に する。
+
+    これまでは「合図（フック）が 届いた 部屋」だけを 出していたので、
+    工房を 立ち上げ直すと、それぞれが つぎに 動くまで 部屋が からっぽに 見えた。
+    2026-10-01 つかい手「スライムが いなくなる。つながってる子は ずっと 出ていてほしい」
+    """
+    if not _LIVE:
+        return                      # おきばが 読めない時は 何も しない（決めつけない）
+    now = time.time()
+    with _lock:
+        for sid in _LIVE:
+            s = _sessions.get(sid)
+            if s is not None:
+                # ひらいている＝まだ 帰っていない。
+                # （工房を 入れなおした 直後は「おわった子」として 読みもどされるので、戻す）
+                if s.get("ended") is not None or s.get("left"):
+                    s["ended"] = None
+                    s["left"] = False
+                continue
+            _sessions[sid] = {
+                "started": now, "busy": 0, "job": None, "job_until": 0.0,
+                "ended": None, "say": None, "say_at": 0.0, "title": None,
+                "waiting": None, "waiting_at": 0.0,
+                "last": now, "transcript": _find_jsonl(sid),
+            }
+
+
 def snapshot():
     save_state()
-    bridge = bridge_ids()
+    bridge = bridge_ids()           # ここで いま ひらいている 部屋（_LIVE）も 数えなおす
+    adopt_live()
     """いま画面に出すべき、セッションの一覧"""
     now = time.time()
     out = []
